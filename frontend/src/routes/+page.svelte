@@ -9,6 +9,14 @@
   let preset: 'p1'|'p2'|'p3'|'p4'|'p5'|'p6'|'p7' = 'p6';
   let audioKbps = 128;
   let fileSizeLabel: string | null = null;
+  let container: 'mp4' | 'mkv' = 'mp4';
+  $: containerNote = (container === 'mp4' && audioCodec === 'libopus') ? 'MP4 does not support Opus; audio will be encoded as AAC automatically.' : null;
+  $: estimated = jobInfo ? {
+    duration_s: jobInfo.duration_s,
+    total_kbps: jobInfo.duration_s > 0 ? (targetMB * 8192.0) / jobInfo.duration_s : 0,
+    video_kbps: jobInfo.duration_s > 0 ? Math.max(((targetMB * 8192.0) / jobInfo.duration_s) - audioKbps, 0) : 0,
+    final_mb: targetMB
+  } : null;
 
   let jobInfo: any = null;
   let taskId: string | null = null;
@@ -74,7 +82,8 @@
         video_codec: videoCodec,
         audio_codec: audioCodec,
         audio_bitrate_kbps: audioKbps,
-        preset
+        preset,
+        container,
       };
       console.log('Starting compression...', payload);
       const { task_id } = await startCompress(payload);
@@ -155,14 +164,27 @@
             <option value="p6">Default (P6)</option>
           </select>
         </div>
+        <div>
+          <label class="block mb-1 text-sm">Container</label>
+          <select class="input w-full" bind:value={container}>
+            <option value="mp4">MP4 (Most compatible)</option>
+            <option value="mkv">MKV (Best with Opus)</option>
+          </select>
+        </div>
       </div>
+      {#if containerNote}
+        <p class="mt-2 text-xs text-amber-400">{containerNote}</p>
+      {/if}
     </details>
   </div>
 
   {#if jobInfo}
     <div class="card">
       <p class="text-sm">Original: {Math.round((jobInfo.original_video_bitrate_kbps||0)+(jobInfo.original_audio_bitrate_kbps||0))} kbps
-        Target: {Math.round(jobInfo.estimate_total_kbps)} kbps -> Video ~{Math.round(jobInfo.estimate_video_kbps)} kbps</p>
+        Target: {estimated ? Math.round(estimated.total_kbps) : Math.round(jobInfo.estimate_total_kbps)} kbps -> Video ~{estimated ? Math.round(estimated.video_kbps) : Math.round(jobInfo.estimate_video_kbps)} kbps</p>
+      {#if estimated}
+        <p class="text-xs opacity-80">Estimated final size: ~{estimated.final_mb.toFixed(2)} MB</p>
+      {/if}
       {#if warnText}<p class="text-amber-400 text-sm mt-1">{warnText}</p>{/if}
     </div>
   {/if}

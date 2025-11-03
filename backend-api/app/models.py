@@ -19,6 +19,7 @@ class CompressRequest(BaseModel):
     audio_codec: Literal['libopus','aac'] = 'libopus'
     audio_bitrate_kbps: int = 128
     preset: Literal['p1','p2','p3','p4','p5','p6','p7'] = 'p6'
+    container: Literal['mp4','mkv'] = 'mp4'
 
 class StatusResponse(BaseModel):
     state: str

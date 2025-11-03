@@ -100,7 +100,8 @@ async def compress(req: CompressRequest):
     input_path = UPLOADS_DIR / req.filename
     if not input_path.exists():
         raise HTTPException(status_code=404, detail="Input not found")
-    output_name = input_path.stem + "_smartdrop.mp4"
+    ext = ".mp4" if req.container == "mp4" else ".mkv"
+    output_name = input_path.stem + "_smartdrop" + ext
     output_path = OUTPUTS_DIR / output_name
     task = celery_app.send_task(
         "app.worker.compress_video",
@@ -134,7 +135,8 @@ async def download(task_id: str):
     if not path or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="File not ready")
     filename = os.path.basename(path)
-    return FileResponse(path, filename=filename, media_type="video/mp4")
+    media_type = "video/mp4" if filename.lower().endswith(".mp4") else "video/x-matroska"
+    return FileResponse(path, filename=filename, media_type=media_type)
 
 
 async def _sse_event_generator(task_id: str) -> AsyncGenerator[bytes, None]:
