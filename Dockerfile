@@ -53,7 +53,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y \
-    python3.10 python3-pip supervisor \
+    python3.10 python3-pip supervisor redis-server \
     libopus0 libx264-163 libx265-199 libvpx7 libnuma1 \
     libva2 libva-drm2 libmfx1 \
     && rm -rf /var/lib/apt/lists/*
@@ -79,7 +79,7 @@ COPY worker/app /app/worker
 COPY --from=frontend-build /frontend/build /app/frontend-build
 
 # Create necessary directories
-RUN mkdir -p /app/uploads /app/outputs /var/log/supervisor
+RUN mkdir -p /app/uploads /app/outputs /var/log/supervisor /var/lib/redis /var/log/redis
 
 # Configure supervisord
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
