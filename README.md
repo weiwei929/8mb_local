@@ -132,7 +132,7 @@ docker run -d \
 
 Or with docker-compose:
 ```bash
-docker compose -f docker-compose.hub-unified.yml up -d
+docker compose -f docker-compose.single.yml up -d
 ```
 
 Access at: http://localhost:8000
@@ -143,7 +143,7 @@ Access at: http://localhost:8000
 Run with separate containers for each service:
 
 ```bash
-docker compose -f docker-compose.hub.yml up -d
+docker compose -f docker-compose.multi.yml up -d
 ```
 
 Frontend: http://localhost:5173  •  Backend: http://localhost:8000
@@ -153,8 +153,8 @@ Frontend: http://localhost:5173  •  Backend: http://localhost:8000
 ### Build locally
 #### Single container:
 ```bash
-docker compose -f docker-compose.unified.yml build
-docker compose -f docker-compose.unified.yml up -d
+docker compose -f docker-compose.single-build.yml build
+docker compose -f docker-compose.single-build.yml up -d
 ```
 
 #### Multi-container:
@@ -163,7 +163,7 @@ docker compose -f docker-compose.unified.yml up -d
 3. Start services (first run: worker compiles FFmpeg, takes longer):
 
 ```bash
-docker compose up --build -d
+docker compose -f docker-compose.multi-build.yml up --build -d
 ```
 
 ### Update to latest images
@@ -171,13 +171,13 @@ docker compose up --build -d
 **Single container:**
 ```bash
 docker pull jms1717/8mblocal:single-container
-docker compose -f docker-compose.hub-unified.yml up -d
+docker compose -f docker-compose.single.yml up -d
 ```
 
 **Multi-container:**
 ```bash
-docker compose -f docker-compose.hub.yml pull
-docker compose -f docker-compose.hub.yml up -d
+docker compose -f docker-compose.multi.yml pull
+docker compose -f docker-compose.multi.yml up -d
 ```
 
 ### Troubleshooting
