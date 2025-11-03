@@ -21,6 +21,10 @@ class CompressRequest(BaseModel):
     preset: Literal['p1','p2','p3','p4','p5','p6','p7'] = 'p6'
     container: Literal['mp4','mkv'] = 'mp4'
     tune: Literal['hq','ll','ull','lossless'] = 'hq'
+    max_width: Optional[int] = None
+    max_height: Optional[int] = None
+    start_time: Optional[str] = None  # Format: seconds (float) or "HH:MM:SS"
+    end_time: Optional[str] = None    # Format: seconds (float) or "HH:MM:SS"
 
 class StatusResponse(BaseModel):
     state: str

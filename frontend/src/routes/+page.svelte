@@ -11,6 +11,11 @@
   let fileSizeLabel: string | null = null;
   let container: 'mp4' | 'mkv' = 'mp4';
   let tune: 'hq'|'ll'|'ull'|'lossless' = 'hq';
+  // New resolution and trim controls
+  let maxWidth: number | null = null;
+  let maxHeight: number | null = null;
+  let startTime: string = '';
+  let endTime: string = '';
   $: containerNote = (container === 'mp4' && audioCodec === 'libopus') ? 'MP4 does not support Opus; audio will be encoded as AAC automatically.' : null;
   $: estimated = jobInfo ? {
     duration_s: jobInfo.duration_s,
@@ -91,6 +96,11 @@
         preset,
         container,
         tune,
+        // Optional resolution and trim parameters
+        max_width: maxWidth || undefined,
+        max_height: maxHeight || undefined,
+        start_time: startTime.trim() || undefined,
+        end_time: endTime.trim() || undefined,
       };
       console.log('Starting compression...', payload);
       const { task_id } = await startCompress(payload);
@@ -201,6 +211,36 @@
           <p class="mt-1 text-xs opacity-70">Quality = best visuals. Low/Ultra‑low latency = faster encodes (good for screen/streams). Lossless = huge files.</p>
         </div>
       </div>
+      
+      <!-- Resolution and Trim Controls -->
+      <div class="mt-4 pt-4 border-t border-gray-700">
+        <h4 class="text-sm font-medium mb-3">Resolution & Trimming</h4>
+        <div class="grid sm:grid-cols-4 gap-4">
+          <div>
+            <label class="block mb-1 text-sm">Max Width (px)</label>
+            <input class="input w-full" type="number" bind:value={maxWidth} placeholder="Original" min="1" />
+          </div>
+          <div>
+            <label class="block mb-1 text-sm">Max Height (px)</label>
+            <input class="input w-full" type="number" bind:value={maxHeight} placeholder="Original" min="1" />
+          </div>
+          <div>
+            <label class="block mb-1 text-sm">Start Time</label>
+            <input class="input w-full" type="text" bind:value={startTime} placeholder="0 or 00:00:00" />
+            <p class="mt-1 text-xs opacity-70">Format: seconds or HH:MM:SS</p>
+          </div>
+          <div>
+            <label class="block mb-1 text-sm">End Time</label>
+            <input class="input w-full" type="text" bind:value={endTime} placeholder="Full duration" />
+            <p class="mt-1 text-xs opacity-70">Format: seconds or HH:MM:SS</p>
+          </div>
+        </div>
+        <p class="mt-2 text-xs opacity-70">
+          Leave resolution blank to keep original. Aspect ratio is maintained.
+          Leave times blank to use full duration.
+        </p>
+      </div>
+      
       {#if containerNote}
         <p class="mt-2 text-xs text-amber-400">{containerNote}</p>
       {/if}
