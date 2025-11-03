@@ -22,7 +22,7 @@ from .cleanup import start_scheduler
 UPLOADS_DIR = Path("/app/uploads")
 OUTPUTS_DIR = Path("/app/outputs")
 
-app = FastAPI(title="SmartDrop API")
+app = FastAPI(title="8mb.local API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -101,7 +101,7 @@ async def compress(req: CompressRequest):
     if not input_path.exists():
         raise HTTPException(status_code=404, detail="Input not found")
     ext = ".mp4" if req.container == "mp4" else ".mkv"
-    output_name = input_path.stem + "_smartdrop" + ext
+    output_name = input_path.stem + "_8mb" + ext
     output_path = OUTPUTS_DIR / output_name
     task = celery_app.send_task(
         "app.worker.compress_video",
@@ -114,6 +114,7 @@ async def compress(req: CompressRequest):
             audio_codec=req.audio_codec,
             audio_bitrate_kbps=req.audio_bitrate_kbps,
             preset=req.preset,
+            tune=req.tune,
         ),
     )
     return {"task_id": task.id}

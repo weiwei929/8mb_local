@@ -26,7 +26,7 @@ def _publish(task_id: str, event: Dict):
 
 @celery_app.task(name="app.worker.compress_video", bind=True)
 def compress_video(self, job_id: str, input_path: str, output_path: str, target_size_mb: float,
-                   video_codec: str, audio_codec: str, audio_bitrate_kbps: int, preset: str):
+                   video_codec: str, audio_codec: str, audio_bitrate_kbps: int, preset: str, tune: str = "hq"):
     # Probe
     info = ffprobe_info(input_path)
     duration = info.get("duration", 0.0)
@@ -36,8 +36,9 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
     maxrate = int(video_kbps * 1.2)
     bufsize = int(video_kbps * 2)
 
-    # Map preset like 'p6' to ffmpeg '-preset p6'
+    # Map preset and tune
     preset_val = preset.lower()
+    tune_val = (tune or "hq").lower()
 
     # Container/audio compatibility: mp4 doesn't support libopus well, fall back to aac
     chosen_audio_codec = audio_codec
@@ -68,7 +69,7 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         "-maxrate", f"{maxrate}k",
         "-bufsize", f"{bufsize}k",
         "-preset", preset_val,
-        "-tune", "hq",
+    "-tune", tune_val,
         "-c:a", chosen_audio_codec,
         "-b:a", a_bitrate_str,
         *mp4_flags,

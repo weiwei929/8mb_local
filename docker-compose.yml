@@ -3,13 +3,13 @@ version: "3.9"
 services:
   redis-broker:
     image: redis:7-alpine
-    container_name: smartdrop-redis
+    container_name: 8mblocal-redis
     ports:
       - "6379:6379"
 
   backend-api:
     build: ./backend-api
-    container_name: smartdrop-backend
+    container_name: 8mblocal-backend
     env_file:
       - ./.env
     environment:
@@ -30,7 +30,7 @@ services:
 
   worker:
     build: ./worker
-    container_name: smartdrop-worker
+    container_name: 8mblocal-worker
     depends_on:
       - redis-broker
     env_file:
@@ -47,7 +47,7 @@ services:
 
   frontend:
     build: ./frontend
-    container_name: smartdrop-frontend
+    container_name: 8mblocal-frontend
     env_file:
       - ./.env
     environment:
@@ -59,4 +59,4 @@ services:
 
 networks:
   default:
-    name: smartdrop-net
+    name: 8mblocal-net

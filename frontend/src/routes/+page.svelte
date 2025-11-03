@@ -7,9 +7,10 @@
   let videoCodec: 'av1_nvenc' | 'hevc_nvenc' | 'h264_nvenc' = 'av1_nvenc';
   let audioCodec: 'libopus' | 'aac' = 'libopus';
   let preset: 'p1'|'p2'|'p3'|'p4'|'p5'|'p6'|'p7' = 'p6';
-  let audioKbps = 128;
+  let audioKbps: 64|96|128|160|192|256 = 128;
   let fileSizeLabel: string | null = null;
   let container: 'mp4' | 'mkv' = 'mp4';
+  let tune: 'hq'|'ll'|'ull'|'lossless' = 'hq';
   $: containerNote = (container === 'mp4' && audioCodec === 'libopus') ? 'MP4 does not support Opus; audio will be encoded as AAC automatically.' : null;
   $: estimated = jobInfo ? {
     duration_s: jobInfo.duration_s,
@@ -38,7 +39,7 @@
   }
 
   function setPresetMB(mb:number){ targetMB = mb; }
-  // "10MB (safe)" option: pick slightly under to ensure final stays below 10MB
+  // "10MB (Discord)" option: pick slightly under to ensure final stays below 10MB
   function setPresetMBSafe10(){ targetMB = 9.7; }
 
   async function onDrop(e: DragEvent){
@@ -84,6 +85,7 @@
         audio_bitrate_kbps: audioKbps,
         preset,
         container,
+        tune,
       };
       console.log('Starting compression...', payload);
       const { task_id } = await startCompress(payload);
@@ -107,7 +109,7 @@
 </script>
 
 <div class="max-w-3xl mx-auto mt-8 space-y-6">
-  <h1 class="text-2xl font-bold">SmartDrop</h1>
+  <h1 class="text-2xl font-bold">8mb.local</h1>
 
   <div class="card">
     <div class="border-2 border-dashed border-gray-700 rounded p-8 text-center"
@@ -123,10 +125,10 @@
   <div class="card grid grid-cols-2 gap-4">
     <div class="space-x-2">
       <button class="btn" on:click={()=>setPresetMB(4)}>4MB</button>
+      <button class="btn" on:click={()=>setPresetMB(4)}>4MB</button>
       <button class="btn" on:click={()=>setPresetMB(5)}>5MB</button>
       <button class="btn" on:click={()=>setPresetMB(8)}>8MB</button>
-      <button class="btn" on:click={setPresetMBSafe10}>10MB (safe)</button>
-      <button class="btn" on:click={()=>setPresetMB(25)}>25MB</button>
+      <button class="btn" on:click={setPresetMBSafe10}>10MB (Discord)</button>
       <button class="btn" on:click={()=>setPresetMB(50)}>50MB</button>
       <button class="btn" on:click={()=>setPresetMB(100)}>100MB</button>
     </div>
@@ -139,7 +141,7 @@
   <div class="card">
     <details>
       <summary class="cursor-pointer">Advanced Options</summary>
-      <div class="mt-4 grid sm:grid-cols-3 gap-4">
+      <div class="mt-4 grid sm:grid-cols-4 gap-4">
         <div>
           <label class="block mb-1 text-sm">Video Codec</label>
           <select class="input w-full" bind:value={videoCodec}>
@@ -169,6 +171,26 @@
           <select class="input w-full" bind:value={container}>
             <option value="mp4">MP4 (Most compatible)</option>
             <option value="mkv">MKV (Best with Opus)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block mb-1 text-sm">Audio Bitrate (kbps)</label>
+          <select class="input w-full" bind:value={audioKbps}>
+            <option value={64}>64</option>
+            <option value={96}>96</option>
+            <option value={128}>128</option>
+            <option value={160}>160</option>
+            <option value={192}>192</option>
+            <option value={256}>256</option>
+          </select>
+        </div>
+        <div>
+          <label class="block mb-1 text-sm">Tune</label>
+          <select class="input w-full" bind:value={tune}>
+            <option value="hq">High quality</option>
+            <option value="ll">Low latency</option>
+            <option value="ull">Ultra low latency</option>
+            <option value="lossless">Lossless</option>
           </select>
         </div>
       </div>
@@ -221,4 +243,13 @@
       {/if}
     </div>
   {/if}
+
+  <div class="card opacity-60 hover:opacity-100 transition-opacity text-xs">
+    <details>
+      <summary>Support the project</summary>
+      <p class="mt-2">If this saved you time and you want to chip in, tips are appreciated but never expected: 
+        <a class="underline" href="https://paypal.me/jasonselsley" target="_blank" rel="noopener noreferrer">paypal.me/jasonselsley</a>
+      </p>
+    </details>
+  </div>
 </div>

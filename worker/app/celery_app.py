@@ -7,7 +7,7 @@ load_dotenv()
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis-broker:6379/0")
 
 celery_app = Celery(
-    "smartdrop",
+    "8mblocal",
     broker=REDIS_URL,
     backend=REDIS_URL,
     include=["app.worker"],  # Ensure task module is imported so tasks register

@@ -51,4 +51,4 @@ COPY app /app/app
 ENV REDIS_URL=redis://redis-broker:6379/0
 
 # Celery worker
-CMD ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=INFO", "-Q", "celery", "-n", "smartdrop@%h"]
+CMD ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=INFO", "-Q", "celery", "-n", "8mblocal@%h"]
