@@ -290,8 +290,20 @@ if frontend_build.exists():
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         """Serve SPA - return index.html for all non-API routes"""
-        # If requesting a file with extension in _app, let static files handle it
-        if full_path.startswith("_app/"):
-            return FileResponse(frontend_build / full_path)
+        # Check if a static file exists in the build directory (favicons, etc.)
+        file_path = frontend_build / full_path
+        if file_path.is_file():
+            # Determine media type based on extension
+            media_type = None
+            if full_path.endswith('.svg'):
+                media_type = "image/svg+xml"
+            elif full_path.endswith('.png'):
+                media_type = "image/png"
+            elif full_path.endswith('.ico'):
+                media_type = "image/x-icon"
+            elif full_path.endswith('.jpg') or full_path.endswith('.jpeg'):
+                media_type = "image/jpeg"
+            return FileResponse(file_path, media_type=media_type)
+        
         # For everything else, serve index.html (SPA routing)
         return FileResponse(frontend_build / "index.html")
