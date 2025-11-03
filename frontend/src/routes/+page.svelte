@@ -8,6 +8,7 @@
   let audioCodec: 'libopus' | 'aac' = 'libopus';
   let preset: 'p1'|'p2'|'p3'|'p4'|'p5'|'p6'|'p7' = 'p6';
   let audioKbps = 128;
+  let fileSizeLabel: string | null = null;
 
   let jobInfo: any = null;
   let taskId: string | null = null;
@@ -18,18 +19,35 @@
   let errorText: string | null = null;
   let isUploading = false;
 
-  function setPresetMB(mb:number){ targetMB = mb; }
+  function formatSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    const mb = kb / 1024;
+    if (mb < 1024) return `${mb.toFixed(2)} MB`;
+    const gb = mb / 1024;
+    return `${gb.toFixed(2)} GB`;
+  }
 
-  function onDrop(e: DragEvent){
+  function setPresetMB(mb:number){ targetMB = mb; }
+  // "10MB (safe)" option: pick slightly under to ensure final stays below 10MB
+  function setPresetMBSafe10(){ targetMB = 9.7; }
+
+  async function onDrop(e: DragEvent){
     e.preventDefault();
     if (!e.dataTransfer) return;
     const f = e.dataTransfer.files?.[0];
-    if (f) file = f;
+    if (f) {
+      file = f;
+      fileSizeLabel = formatSize(f.size);
+      if (!isUploading) await doUpload();
+    }
   }
   function allowDrop(e: DragEvent){ e.preventDefault(); }
 
   async function doUpload(){
     if (!file) return;
+    if (isUploading) return;
     isUploading = true;
     errorText = null;
     try {
@@ -86,14 +104,19 @@
     <div class="border-2 border-dashed border-gray-700 rounded p-8 text-center"
          on:drop={onDrop} on:dragover={allowDrop}>
       <p class="mb-2">Drag & drop a video here</p>
-      <input type="file" accept="video/*" on:change={(e:any)=>file=e.target.files?.[0]||null} />
-      {#if file}<p class="mt-2 text-sm text-gray-400">{file.name}</p>{/if}
+      <input type="file" accept="video/*" on:change={async (e:any)=>{ const f=e.target.files?.[0]||null; file=f; fileSizeLabel = f? formatSize(f.size): null; if (f) { await doUpload(); } }} />
+      {#if file}
+        <p class="mt-2 text-sm text-gray-400">{file.name} {#if fileSizeLabel}<span class="opacity-70">• {fileSizeLabel}</span>{/if}</p>
+      {/if}
     </div>
   </div>
 
   <div class="card grid grid-cols-2 gap-4">
     <div class="space-x-2">
+      <button class="btn" on:click={()=>setPresetMB(4)}>4MB</button>
+      <button class="btn" on:click={()=>setPresetMB(5)}>5MB</button>
       <button class="btn" on:click={()=>setPresetMB(8)}>8MB</button>
+      <button class="btn" on:click={setPresetMBSafe10}>10MB (safe)</button>
       <button class="btn" on:click={()=>setPresetMB(25)}>25MB</button>
       <button class="btn" on:click={()=>setPresetMB(50)}>50MB</button>
       <button class="btn" on:click={()=>setPresetMB(100)}>100MB</button>
