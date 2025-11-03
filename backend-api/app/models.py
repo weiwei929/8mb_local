@@ -15,7 +15,7 @@ class CompressRequest(BaseModel):
     job_id: str
     filename: str
     target_size_mb: float
-    video_codec: Literal['av1_nvenc','hevc_nvenc','h264_nvenc'] = 'av1_nvenc'
+    video_codec: Literal['av1_nvenc','hevc_nvenc','h264_nvenc','libx264','libx265','libsvtav1'] = 'av1_nvenc'
     audio_codec: Literal['libopus','aac'] = 'libopus'
     audio_bitrate_kbps: int = 128
     preset: Literal['p1','p2','p3','p4','p5','p6','p7'] = 'p6'
@@ -54,7 +54,7 @@ class PasswordChange(BaseModel):
 
 class DefaultPresets(BaseModel):
     target_mb: int = 25
-    video_codec: Literal['av1_nvenc','hevc_nvenc','h264_nvenc'] = 'av1_nvenc'
+    video_codec: Literal['av1_nvenc','hevc_nvenc','h264_nvenc','libx264','libx265','libsvtav1'] = 'av1_nvenc'
     audio_codec: Literal['libopus','aac'] = 'libopus'
     preset: Literal['p1','p2','p3','p4','p5','p6','p7'] = 'p6'
     audio_kbps: Literal[64,96,128,160,192,256] = 128

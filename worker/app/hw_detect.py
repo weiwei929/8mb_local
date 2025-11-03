@@ -164,6 +164,17 @@ def map_codec_to_hw(requested_codec: str, hw_info: Dict) -> tuple[str, list]:
     Map user-requested codec to appropriate hardware encoder.
     Returns: (encoder_name, extra_flags)
     """
+    # If user explicitly requested a CPU encoder, honor it even if HW is available
+    if requested_codec in ("libx264", "libx265", "libsvtav1"):
+        encoder = requested_codec
+        flags: list[str] = []
+        if encoder == "libx264":
+            flags = ["-pix_fmt", "yuv420p", "-profile:v", "high"]
+        elif encoder == "libx265":
+            flags = ["-pix_fmt", "yuv420p"]
+        # libsvtav1 generally picks sane defaults; keep flags empty to allow encoder to choose
+        return encoder, flags
+
     # Extract base codec name
     if "h264" in requested_codec:
         base = "h264"

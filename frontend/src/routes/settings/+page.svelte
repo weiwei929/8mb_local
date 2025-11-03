@@ -438,9 +438,12 @@
 								bind:value={videoCodec}
 								class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
 							>
-								<option value="av1_nvenc">AV1 (Best Quality)</option>
-								<option value="hevc_nvenc">HEVC (H.265)</option>
-								<option value="h264_nvenc">H.264 (Most Compatible)</option>
+								<option value="av1_nvenc">AV1 (Best Quality, NVENC)</option>
+								<option value="hevc_nvenc">HEVC (H.265, NVENC)</option>
+								<option value="h264_nvenc">H.264 (NVENC, Most Compatible)</option>
+								<option value="libsvtav1">AV1 (CPU)</option>
+								<option value="libx265">HEVC (H.265, CPU)</option>
+								<option value="libx264">H.264 (CPU)</option>
 							</select>
 						</div>
 
