@@ -400,14 +400,48 @@ docker compose up -d
       jms1717/8mblocal:latest
     ```
   - This tells the NVIDIA Container Toolkit to mount NVENC libraries into the container
-  - **Driver version issue**: If you see "Required: 13.0 Found: 12.1", your NVIDIA driver is too old
-    - Container requires driver 550+ for full NVENC API 13.0 support
-    - Check your driver: `nvidia-smi`
-    - Debian 12 stable ships with driver 535 (NVENC API 12.1) which uses CUDA 11.8 build
-  - Confirm NVIDIA drivers installed on host: `nvidia-smi`
-  - Verify library is accessible: `docker exec 8mblocal ls -la /usr/lib/x86_64-linux-gnu/libnvidia-encode.so*`
+  
+  - **Critical: Driver Version Mismatch** - The #1 cause of NVENC failures:
+    - **Error symptom**: `Driver does not support the required nvenc API version. Required: 13.0 Found: 12.1`
+    - **Root cause**: Container ffmpeg requires NVENC API 13.0, but host driver only provides 12.1
+    - **Who's affected**: Systems running NVIDIA driver 535.x (common on Debian 12 stable, older Ubuntu LTS)
+    - **Quick check**: Run `nvidia-smi` and look at driver version:
+      - Driver **535.x** = NVENC API 12.1 ❌ (too old)
+      - Driver **550.x or newer** = NVENC API 13.0 ✅ (compatible)
+    
+  - **Solution: Upgrade NVIDIA Driver**
+    
+    For **Debian 12** systems:
+    ```bash
+    # Debian backports has older drivers - use NVIDIA's official repo instead
+    wget https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb
+    sudo dpkg -i cuda-keyring_1.1-1_all.deb
+    sudo apt update
+    sudo apt install nvidia-driver
+    sudo reboot  # Required to load new driver
+    ```
+    
+    For **Ubuntu** systems:
+    ```bash
+    # Add NVIDIA PPA for latest drivers
+    sudo add-apt-repository ppa:graphics-drivers/ppa
+    sudo apt update
+    sudo apt install nvidia-driver-550  # or newer
+    sudo reboot
+    ```
+    
+    After reboot, verify: `nvidia-smi` should show driver 550+ and `ffmpeg -encoders | grep nvenc` inside container should work.
+    
+  - **Why this happens**: Newer ffmpeg builds use NVENC API 13.0 features for better quality/performance. Older drivers (535.x) only support up to API 12.1.
+  
+  - **Verification steps**:
+    1. Check host driver: `nvidia-smi` (look for version 550+)
+    2. Test NVENC in container: `docker exec 8mblocal ffmpeg -f lavfi -i nullsrc -c:v h264_nvenc -f null -`
+    3. If you see "Cannot load libnvidia-encode.so.1", add the `NVIDIA_DRIVER_CAPABILITIES` env var above
+    4. If you see "Required: 13.0 Found: 12.1", upgrade your driver
+  
   - On Linux: Verify [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) is installed
-  - **If still failing**: System will automatically fallback to CPU encoding
+  - **If driver upgrade not possible**: System will automatically fallback to CPU encoding
   
 - **Intel QSV not working**: 
   - Ensure `/dev/dri` exists: `ls -l /dev/dri`
@@ -431,10 +465,28 @@ docker compose up -d
 #### NVENC "Operation not permitted" Error
 This error occurs when NVENC encoder fails to initialize. **The system now automatically detects this and falls back to CPU**, but if you want GPU acceleration:
 
+**Error Messages You May See:**
+1. **"Cannot load libnvidia-encode.so.1"**
+   - **Cause**: Missing `NVIDIA_DRIVER_CAPABILITIES` environment variable
+   - **Fix**: Add `-e NVIDIA_DRIVER_CAPABILITIES=compute,video,utility` to docker run command (see example in NVENC section above)
+   - **Why**: By default, NVIDIA Container Toolkit only mounts compute libraries, not video encoding libraries
+
+2. **"Driver does not support the required nvenc API version. Required: 13.0 Found: 12.1"**
+   - **Cause**: Your NVIDIA driver is too old (535.x series only supports NVENC API 12.1)
+   - **Fix**: Upgrade to driver 550+ using the instructions in the NVENC troubleshooting section above
+   - **Common on**: Debian 12 stable, older Ubuntu LTS releases
+   - **Verification**: Run `nvidia-smi` and check driver version
+
+3. **"Could not open encoder before EOF" or "Task finished with error code: -22 (Invalid argument)"**
+   - **Cause**: Usually accompanies one of the errors above
+   - **Effect**: FFmpeg crashes with exit code 255
+   - **Fix**: Resolve the underlying library or API version issue
+
 **Common causes:**
-1. **Driver mismatch**: Host and container NVIDIA driver versions don't match
-2. **Missing NVIDIA Container Toolkit**: Docker can't access GPU
-3. **Insufficient permissions**: Container can't access encoder
+1. **Driver API version mismatch** (most common - see error #2 above)
+2. **Missing video encoding libraries** (see error #1 above)
+3. **Missing NVIDIA Container Toolkit**: Docker can't access GPU
+4. **Insufficient permissions**: Container can't access encoder
 
 **Quick Fix (Automatic):**
 The system will detect the initialization failure and automatically use CPU encoding. You'll see:
@@ -445,24 +497,48 @@ Using encoder: libx265 (requested: hevc_nvenc)
 Your video will still compress, just using CPU instead of GPU.
 
 **To Enable GPU (Optional):**
-1. **Driver mismatch**: Host and container NVIDIA driver versions don't match
-   - Check host: `nvidia-smi`
-   - Check container: `docker exec 8mblocal nvidia-smi`
-   - Solution: Update host drivers or pull latest image
+1. **Fix missing NVIDIA_DRIVER_CAPABILITIES** (if you saw error #1 above):
+   - Add environment variable to docker run: `-e NVIDIA_DRIVER_CAPABILITIES=compute,video,utility`
+   - Or in Docker Compose:
+     ```yaml
+     environment:
+       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+     ```
+
+2. **Upgrade NVIDIA driver** (if you saw error #2 above):
+   - See detailed upgrade instructions in the "NVENC issues" section above
+   - Debian 12: Use NVIDIA's official CUDA repository (not backports)
+   - Ubuntu: Use graphics-drivers PPA
+   - Requires reboot after installation
    
-2. **Missing NVIDIA Container Toolkit**: Docker can't access GPU
+3. **Missing NVIDIA Container Toolkit**: Docker can't access GPU
    - Install: `distribution=$(. /etc/os-release;echo $ID$VERSION_ID) && curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg && curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list && sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit`
    - Restart Docker: `sudo systemctl restart docker`
    
-3. **Insufficient permissions**: Container can't access encoder
-   - Try adding `--privileged` flag (not recommended for production)
-   - Better solution: Fix Container Toolkit installation
-   
-4. **Workaround**: Disable NVENC and use CPU or VAAPI
+4. **Workaround if upgrade not possible**: Disable NVENC and use CPU or VAAPI
    - Go to Settings → Available Codecs
    - Uncheck all NVENC codecs (H.264/HEVC/AV1)
    - Enable CPU codecs or VAAPI if you have Intel/AMD GPU
    - System will automatically use available encoders
+
+**Real-World Example: Debian 12 with Driver 535**
+On a fresh Debian 12 install with Quadro RTX 4000, the default driver (535.247.01) is too old:
+```bash
+# Initial state - fails with API 12.1 vs 13.0 error
+nvidia-smi  # Shows driver 535.247.01
+
+# Fix by upgrading to NVIDIA's official driver repository
+wget https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt update
+sudo apt install nvidia-driver  # Installs 550+ series
+sudo reboot
+
+# After reboot - NVENC works!
+nvidia-smi  # Shows driver 580.95.05 or newer
+```
+
+This resolved the exact issue encountered on the powerhouse server.
 
 #### General Issues
 - **Permission denied writing uploads/outputs**: 
