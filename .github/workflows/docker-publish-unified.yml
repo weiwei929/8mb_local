@@ -27,7 +27,7 @@ jobs:
         run: |
           SHA_TAG=sha-${GITHUB_SHA::7}
           echo "sha_tag=${SHA_TAG}" >> $GITHUB_OUTPUT
-          if [[ "${GITHUB_REF}" == refs/heads/main || "${GITHUB_REF}" == refs/heads/master ]]; then
+          if [[ "${GITHUB_REF}" == refs/heads/main || "${GITHUB_REF}" == refs/heads/master || "${GITHUB_REF}" == refs/heads/single-container ]]; then
             echo "latest_tag=latest" >> $GITHUB_OUTPUT
           fi
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
