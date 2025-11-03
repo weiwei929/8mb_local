@@ -61,7 +61,7 @@ def detect_hw_accel() -> Dict[str, any]:
     result["available_encoders"] = {
         "h264": "libx264",
         "hevc": "libx265",
-        "av1": "libsvtav1",  # or libaom-av1
+        "av1": "libaom-av1",  # widely available CPU AV1 encoder
     }
     
     return result
@@ -165,14 +165,15 @@ def map_codec_to_hw(requested_codec: str, hw_info: Dict) -> tuple[str, list]:
     Returns: (encoder_name, extra_flags)
     """
     # If user explicitly requested a CPU encoder, honor it even if HW is available
-    if requested_codec in ("libx264", "libx265", "libsvtav1"):
-        encoder = requested_codec
+    if requested_codec in ("libx264", "libx265", "libsvtav1", "libaom-av1"):
+        # Map libsvtav1 to libaom-av1 unless explicitly supported
+        encoder = requested_codec if requested_codec != "libsvtav1" else "libaom-av1"
         flags: list[str] = []
         if encoder == "libx264":
             flags = ["-pix_fmt", "yuv420p", "-profile:v", "high"]
         elif encoder == "libx265":
             flags = ["-pix_fmt", "yuv420p"]
-        # libsvtav1 generally picks sane defaults; keep flags empty to allow encoder to choose
+        # libaom-av1 generally picks sane defaults; keep flags minimal
         return encoder, flags
 
     # Extract base codec name

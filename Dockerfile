@@ -6,6 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     build-essential yasm cmake pkg-config git wget \
     libnuma-dev libx264-dev libx265-dev libvpx-dev libopus-dev \
+    libaom-dev \
     libva-dev libdrm-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -18,11 +19,11 @@ RUN git clone https://git.videolan.org/git/ffmpeg/nv-codec-headers.git && \
 # Build FFmpeg with all hardware acceleration support
 RUN wget https://ffmpeg.org/releases/ffmpeg-7.0.tar.xz && \
     tar xf ffmpeg-7.0.tar.xz && cd ffmpeg-7.0 && \
-    ./configure \
+        ./configure \
       --enable-nonfree --enable-gpl \
       --enable-cuda-nvcc --enable-libnpp --enable-nvenc \
       --enable-vaapi \
-      --enable-libx264 --enable-libx265 --enable-libvpx --enable-libopus \
+                    --enable-libx264 --enable-libx265 --enable-libvpx --enable-libopus --enable-libaom \
       --extra-cflags=-I/usr/local/cuda/include \
       --extra-ldflags=-L/usr/local/cuda/lib64 && \
     make -j$(nproc) && make install && ldconfig && \
@@ -52,7 +53,7 @@ ENV PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y \
     python3.10 python3-pip supervisor redis-server \
     libopus0 libx264-163 libx265-199 libvpx7 libnuma1 \
-    libva2 libva-drm2 \
+    libva2 libva-drm2 libaom3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy FFmpeg from build stage (only what we need)
