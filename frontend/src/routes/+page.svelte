@@ -532,7 +532,6 @@
 
   // Remove older reset; replace with one that clears readiness flags too
   
-  function reset(){ file=null; uploadedFileName=null; jobInfo=null; taskId=null; progress=0; displayedProgress=0; logLines=[]; doneStats=null; warnText=null; errorText=null; isUploading=false; isCompressing=false; isFinalizing=false; decodeMethod=null; encodeMethod=null; isReady=false; readyFilename=null; try { esRef?.close(); } catch {} }
   function reset(){ file=null; uploadedFileName=null; jobInfo=null; taskId=null; progress=0; displayedProgress=0; logLines=[]; doneStats=null; warnText=null; errorText=null; isUploading=false; isCompressing=false; isFinalizing=false; decodeMethod=null; encodeMethod=null; isReady=false; readyFilename=null; showTryDownload=false; if (readyTimer) { clearTimeout(readyTimer); readyTimer=null; } try { esRef?.close(); } catch {} }
   $: (() => { /* clear ETA when not compressing */ if (!isCompressing) { startedAt = null; etaSeconds = null; etaLabel = null; currentSpeedX = null; hasProgress = false; isFinalizing = false; } })();
 
