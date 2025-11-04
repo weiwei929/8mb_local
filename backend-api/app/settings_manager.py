@@ -127,6 +127,12 @@ def write_env_file(env_vars: dict):
                 f.write(f"{key}={value}\n")
         os.chmod(ENV_FILE, 0o600)
     except Exception as e:
+        # Gracefully handle read-only filesystems or permission issues when .env is mounted :ro
+        msg = str(e)
+        if isinstance(e, PermissionError) or 'Read-only file system' in msg or 'EROFS' in msg:
+            # Don't fail the request – settings that are JSON-backed will still persist
+            print(f"WARNING: Failed to write {ENV_FILE}: {e}. The file may be mounted read-only. Skipping .env write.")
+            return
         raise RuntimeError(f"Failed to write {ENV_FILE}: {e}")
 
 
@@ -196,7 +202,10 @@ def initialize_env_if_missing():
             # History on by default
             'HISTORY_ENABLED': 'true'
         }
-        write_env_file(default_env)
+        try:
+            write_env_file(default_env)
+        except Exception as e:
+            print(f"WARNING: Could not initialize {ENV_FILE}: {e}")
 
 
 def get_default_presets() -> dict:

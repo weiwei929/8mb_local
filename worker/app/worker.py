@@ -290,10 +290,18 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
             duration_opts = ["-to", str(end_time)]
             _publish(self.request.id, {"type": "log", "message": f"Trimming: end at {end_time}"})
 
-    # Prefer robust AV1 decoder when encoding on CPU and input is AV1
-    if info.get("video_codec") == "av1" and actual_encoder in ("libx264", "libx265", "libaom-av1"):
+    # Prefer robust AV1 software decoder for AV1 input across all encode paths to avoid unsupported HW decode
+    if info.get("video_codec") == "av1":
         input_opts += ["-c:v", "libdav1d"]
         _publish(self.request.id, {"type": "log", "message": "Decoder: using libdav1d for AV1 input"})
+
+    # Enable CUDA hardware decode only for codecs typically supported by NVDEC
+    try:
+        if actual_encoder.endswith("_nvenc") and info.get("video_codec") in ("h264", "hevc"):
+            init_hw_flags = ["-hwaccel", "cuda"] + init_hw_flags
+            _publish(self.request.id, {"type": "log", "message": "Decoder: using cuda"})
+    except Exception:
+        pass
 
     # Construct command
     cmd = [

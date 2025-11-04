@@ -239,8 +239,7 @@ def map_codec_to_hw(requested_codec: str, hw_info: Dict) -> tuple[str, list, lis
         
         # Add hardware-specific flags based on encoder type
         if encoder.endswith("_nvenc"):
-            # Enable CUDA hardware decode when available; keep frames in system memory to avoid filter issues
-            init_flags = ["-hwaccel", "cuda"]
+            # Keep pix_fmt; decide on hardware decode in worker based on input codec support
             flags = ["-pix_fmt", "yuv420p"]
             if "h264" in encoder:
                 flags += ["-profile:v", "high"]
@@ -274,7 +273,7 @@ def map_codec_to_hw(requested_codec: str, hw_info: Dict) -> tuple[str, list, lis
     
     # Add hardware-specific flags
     if encoder.endswith("_nvenc"):
-        init_flags = ["-hwaccel", "cuda"]
+        # Decide on hardware decode in worker based on input codec support
         flags = ["-pix_fmt", "yuv420p"]
         if base == "h264":
             flags += ["-profile:v", "high"]
