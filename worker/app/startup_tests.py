@@ -75,26 +75,39 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
     """
     from .hw_detect import map_codec_to_hw
     
-    logger.info("=" * 60)
-    logger.info("Starting encoder validation tests...")
-    logger.info(f"Hardware type detected: {hw_info.get('type', 'unknown').upper()}")
-    logger.info("=" * 60)
+    logger.info("")
+    logger.info("╔" + "═" * 68 + "╗")
+    logger.info("║" + " " * 16 + "ENCODER VALIDATION TESTS" + " " * 28 + "║")
+    logger.info("╚" + "═" * 68 + "╝")
+    logger.info("")
+    
+    hw_type = hw_info.get('type', 'unknown').upper()
+    hw_device = hw_info.get('device', 'N/A')
+    logger.info(f"  Hardware Type:   {hw_type}")
+    logger.info(f"  Hardware Device: {hw_device}")
+    logger.info("")
+    logger.info("─" * 70)
     
     cache: Dict[str, bool] = {}
+    test_results = []  # Track for summary table
     
     # Test all common codecs for this hardware type
     test_codecs = []
-    hw_type = hw_info.get("type", "cpu")
+    hw_type_lower = hw_info.get("type", "cpu")
     
-    if hw_type == "nvidia":
+    if hw_type_lower == "nvidia":
         test_codecs = ["h264_nvenc", "hevc_nvenc", "av1_nvenc"]
-    elif hw_type == "intel":
+    elif hw_type_lower == "intel":
         test_codecs = ["h264_qsv", "hevc_qsv", "av1_qsv"]
-    elif hw_type in ("amd", "vaapi"):
+    elif hw_type_lower in ("amd", "vaapi"):
         test_codecs = ["h264_vaapi", "hevc_vaapi", "av1_vaapi"]
     
     # Always test CPU fallbacks
     test_codecs.extend(["libx264", "libx265", "libaom-av1"])
+    
+    logger.info(f"  Testing {len(test_codecs)} encoder(s)...")
+    logger.info("─" * 70)
+    logger.info("")
     
     for codec in test_codecs:
         try:
@@ -103,14 +116,15 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
             # Skip if not actually a hardware encoder for this system
             if actual_encoder in ("libx264", "libx265", "libaom-av1"):
                 if codec not in ("libx264", "libx265", "libaom-av1"):
-                    logger.info(f"  [{codec}] -> Skipped (maps to CPU: {actual_encoder})")
+                    logger.info(f"  [{codec:15s}] ⊗ SKIPPED - Maps to CPU fallback: {actual_encoder}")
                     continue
             
             # Check availability first (fast)
             if not is_encoder_available(actual_encoder):
-                logger.warning(f"  [{codec}] -> UNAVAILABLE (not in ffmpeg -encoders)")
+                logger.warning(f"  [{codec:15s}] ✗ UNAVAILABLE - Not in ffmpeg -encoders list")
                 cache_key = f"{actual_encoder}:{':'.join(init_hw_flags)}"
                 cache[cache_key] = False
+                test_results.append((codec, actual_encoder, "UNAVAILABLE", "Not in ffmpeg -encoders"))
                 continue
             
             # Run init test (slow but thorough)
@@ -118,14 +132,36 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
             success, message = test_encoder_init(actual_encoder, init_hw_flags)
             cache[cache_key] = success
             
-            status = "✓ PASS" if success else "✗ FAIL"
-            logger.info(f"  [{codec}] -> {status} ({actual_encoder}) - {message}")
+            if success:
+                logger.info(f"  [{codec:15s}] ✓ PASS - {actual_encoder} initialized successfully")
+                test_results.append((codec, actual_encoder, "PASS", message))
+            else:
+                logger.error(f"  [{codec:15s}] ✗ FAIL - {actual_encoder}: {message}")
+                test_results.append((codec, actual_encoder, "FAIL", message))
             
         except Exception as e:
-            logger.error(f"  [{codec}] -> ERROR: {str(e)}")
+            logger.error(f"  [{codec:15s}] ✗ ERROR - Exception: {str(e)}")
+            test_results.append((codec, "unknown", "ERROR", str(e)))
     
-    logger.info("=" * 60)
-    logger.info(f"Encoder tests complete. {sum(cache.values())} passed, {len(cache) - sum(cache.values())} failed.")
-    logger.info("=" * 60)
+    # Summary section
+    logger.info("")
+    logger.info("─" * 70)
+    logger.info("  TEST SUMMARY")
+    logger.info("─" * 70)
+    
+    passed = sum(1 for _, _, status, _ in test_results if status == "PASS")
+    failed = sum(1 for _, _, status, _ in test_results if status in ("FAIL", "ERROR", "UNAVAILABLE"))
+    total_tested = len(test_results)
+    
+    logger.info(f"  Total Encoders Tested: {total_tested}")
+    logger.info(f"  ✓ Passed:  {passed}")
+    logger.info(f"  ✗ Failed:  {failed}")
+    logger.info("")
+    
+    if failed > 0:
+        logger.warning("  Failed encoders will automatically fall back to CPU encoding.")
+    
+    logger.info("─" * 70)
+    logger.info("")
     
     return cache

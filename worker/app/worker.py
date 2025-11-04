@@ -22,12 +22,23 @@ ENCODER_TEST_CACHE: Dict[str, bool] = {}
 
 # Run startup tests once on module load
 try:
-    logger.info("Running encoder validation tests at startup...")
+    logger.info("")
+    logger.info("*" * 70)
+    logger.info("  8MB.LOCAL WORKER INITIALIZATION")
+    logger.info("*" * 70)
+    logger.info("")
     _hw_info = get_hw_info()
     ENCODER_TEST_CACHE = run_startup_tests(_hw_info)
-    logger.info(f"Encoder cache populated with {len(ENCODER_TEST_CACHE)} entries.")
+    logger.info(f"✓ Encoder cache ready: {len(ENCODER_TEST_CACHE)} encoder(s) validated")
+    logger.info(f"✓ Worker initialization complete")
+    logger.info("*" * 70)
+    logger.info("")
 except Exception as e:
-    logger.error(f"Startup encoder tests failed: {e}")
+    logger.error("")
+    logger.error("*" * 70)
+    logger.error(f"✗ STARTUP ERROR: Encoder tests failed: {e}")
+    logger.error("*" * 70)
+    logger.error("")
     # Continue anyway; tests will run on-demand if cache is empty
 
 def _redis() -> Redis:
