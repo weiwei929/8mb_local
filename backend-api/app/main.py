@@ -178,47 +178,53 @@ async def _sync_codec_settings_from_tests(timeout_s: int = 60):
     - CPU codecs are always enabled and are not tested at startup.
     """
     try:
-        # Get hardware info (cached) to determine which encoders to expose
-        hw_info = _get_hw_info_cached() or {}
-        avail = hw_info.get("available_encoders", {})  # e.g., {"h264": "h264_nvenc", ...}
+        # Poll briefly for hardware info to avoid writing CPU-only when worker isn't ready
+        hw_info: dict = {}
+        avail: dict = {}
+        deadline = time.time() + max(5, timeout_s)
+        while time.time() < deadline:
+            try:
+                hw_info = _get_hw_info_cached() or {}
+                avail = hw_info.get("available_encoders", {}) or {}
+                if avail:  # Got concrete encoders like h264_nvenc, etc.
+                    break
+            except Exception:
+                pass
+            await asyncio.sleep(1)
 
-        # Start with everything disabled for HW codecs; CPU codecs always enabled
-        payload: dict[str, bool] = {
-            # NVIDIA
-            "h264_nvenc": False,
-            "hevc_nvenc": False,
-            "av1_nvenc": False,
-            # Intel QSV
-            "h264_qsv": False,
-            "hevc_qsv": False,
-            "av1_qsv": False,
-            # VAAPI
-            "h264_vaapi": False,
-            "hevc_vaapi": False,
-            "av1_vaapi": False,
-            # AMD AMF
-            "h264_amf": False,
-            "hevc_amf": False,
-            "av1_amf": False,
-            # CPU (always on; no startup tests needed)
-            "libx264": True,
-            "libx265": True,
-            "libaom_av1": True,
-        }
-
-        # Enable exactly what the worker reports as available encoders
-        # Values in 'avail' are concrete encoder names like 'h264_nvenc', 'hevc_qsv', etc.
-        for v in avail.values():
-            key = v.replace('-', '_')
-            if key in payload:
-                payload[key] = True
-
-        # Persist to .env via settings manager (handles write failures gracefully)
+        # Start from current settings to avoid clobbering when hardware isn't detected yet
         from . import settings_manager as _sm
+        current = _sm.get_codec_visibility_settings()
+        payload: dict[str, bool] = dict(current)
+
+        # CPU codecs always enabled
+        payload["libx264"] = True
+        payload["libx265"] = True
+        payload["libaom_av1"] = True
+
+        hardware_keys = [
+            "h264_nvenc","hevc_nvenc","av1_nvenc",
+            "h264_qsv","hevc_qsv","av1_qsv",
+            "h264_vaapi","hevc_vaapi","av1_vaapi",
+            "h264_amf","hevc_amf","av1_amf",
+        ]
+
+        if avail:
+            # If we have a definitive list, disable all HW keys then enable reported ones
+            for k in hardware_keys:
+                payload[k] = False
+            for v in avail.values():
+                key = v.replace('-', '_')
+                if key in payload:
+                    payload[key] = True
+        else:
+            # No hardware info yet; do not change existing HW visibility
+            pass
+
+        # Persist and flag banner
         _sm.update_codec_visibility_settings(payload)
         logger.info("Applied codec visibility from detected hardware: %s", ', '.join([k for k, v in payload.items() if v]))
 
-        # Flag for UI banner: synced on startup
         try:
             await redis.set("startup:codec_visibility_synced", "1")
             await redis.set("startup:codec_visibility_synced_at", str(int(time.time())))
