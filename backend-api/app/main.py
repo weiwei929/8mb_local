@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
+import psutil
 
 from .auth import basic_auth
 from .config import settings
@@ -67,6 +68,63 @@ def _calc_bitrates(target_mb: float, duration_s: float, audio_kbps: int) -> tupl
     video_kbps = max(total_kbps - float(audio_kbps), 0.0)
     warn = video_kbps < 100
     return total_kbps, video_kbps, warn
+
+
+def _get_system_capabilities() -> dict:
+    """Gather system capabilities: CPU, memory, GPUs, driver versions."""
+    info: dict = {
+        "cpu": {
+            "cores_logical": psutil.cpu_count(logical=True) or 0,
+            "cores_physical": psutil.cpu_count(logical=False) or 0,
+        },
+        "memory": {
+            "total_gb": round(psutil.virtual_memory().total / (1024**3), 2),
+            "available_gb": round(psutil.virtual_memory().available / (1024**3), 2),
+        },
+        "gpus": [],
+        "nvidia_driver": None,
+    }
+
+    # CPU model (best-effort)
+    try:
+        if hasattr(os, 'uname'):
+            # Linux: read /proc/cpuinfo
+            try:
+                with open('/proc/cpuinfo','r') as f:
+                    for line in f:
+                        if 'model name' in line:
+                            info["cpu"]["model"] = line.split(':',1)[1].strip()
+                            break
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # NVIDIA GPUs via nvidia-smi (if available)
+    try:
+        q = "index,name,memory.total,memory.used,driver_version,uuid"
+        res = subprocess.run(
+            ["nvidia-smi", f"--query-gpu={q}", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=2
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            lines = [l.strip() for l in res.stdout.strip().splitlines() if l.strip()]
+            for ln in lines:
+                parts = [p.strip() for p in ln.split(',')]
+                if len(parts) >= 6:
+                    idx, name, mem_total, mem_used, drv, uuid = parts[:6]
+                    info["gpus"].append({
+                        "index": int(idx),
+                        "name": name,
+                        "memory_total_gb": round(float(mem_total)/1024.0, 2),
+                        "memory_used_gb": round(float(mem_used)/1024.0, 2),
+                        "uuid": uuid,
+                    })
+                    info["nvidia_driver"] = drv
+    except Exception:
+        pass
+
+    return info
 
 
 @app.on_event("startup")
@@ -239,6 +297,20 @@ async def get_available_codecs() -> AvailableCodecsResponse:
             available_encoders={"h264": "libx264", "hevc": "libx265", "av1": "libaom-av1"},
             enabled_codecs=["libx264", "libx265", "libaom-av1"]
         )
+
+
+@app.get("/api/system/capabilities")
+async def system_capabilities():
+    """Return detailed system capabilities including CPU, memory, GPUs and worker HW type."""
+    caps = _get_system_capabilities()
+    # Also include hardware acceleration type from worker
+    try:
+        result = celery_app.send_task("worker.worker.get_hardware_info")
+        hw_info = result.get(timeout=5)
+    except Exception:
+        hw_info = {"type": "cpu", "available_encoders": {}}
+    caps["hardware"] = hw_info
+    return caps
 
 
 # Settings management endpoints

@@ -78,3 +78,9 @@ export async function getAvailableCodecs() {
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
+
+export async function getSystemCapabilities() {
+  const res = await fetch(`${BACKEND}/api/system/capabilities`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}

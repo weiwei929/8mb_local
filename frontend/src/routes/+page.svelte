@@ -1,7 +1,7 @@
 <script lang="ts">
   import '../app.css';
   import { onMount } from 'svelte';
-  import { uploadWithProgress, startCompress, openProgressStream, downloadUrl, getAvailableCodecs } from '$lib/api';
+  import { uploadWithProgress, startCompress, openProgressStream, downloadUrl, getAvailableCodecs, getSystemCapabilities } from '$lib/api';
 
   let file: File | null = null;
   let uploadedFileName: string | null = null; // Track what file was uploaded
@@ -50,6 +50,8 @@
   // Available codecs from backend
   let availableCodecs: Array<{value: string, label: string, group: string}> = [];
   let hardwareType = 'cpu';
+  let sysCaps: any = null;
+  let sysCapsError: string | null = null;
 
   // Load default presets and available codecs on mount
   onMount(async () => {
@@ -88,6 +90,13 @@
         { value: 'libx265', label: 'HEVC (H.265, CPU)', group: 'cpu' },
         { value: 'libaom-av1', label: 'AV1 (CPU)', group: 'cpu' },
       ];
+    }
+
+    // Load system capabilities (CPU, memory, GPUs)
+    try {
+      sysCaps = await getSystemCapabilities();
+    } catch (e:any) {
+      sysCapsError = e?.message || 'Failed to fetch system capabilities';
     }
   });
 
@@ -254,9 +263,54 @@
           if (data.type === 'error') { logLines = [data.message, ...logLines]; isCompressing = false; try { esRef?.close(); } catch {} }
         } catch {}
       }
+      es.onerror = () => {
+        logLines = ['[SSE] Connection error: lost progress stream.', ...logLines].slice(0, 500);
+        errorText = 'Lost connection to progress stream. Check server/network and try again.';
+        isCompressing = false;
+        try { esRef?.close(); } catch {}
+      }
     } catch (err: any) {
       console.error('Compress failed:', err);
       errorText = `Compression failed: ${err.message || err}`;
+    }
+  }
+
+  function reconnectStream(){
+    if (!taskId) return;
+    errorText = null;
+    try { esRef?.close(); } catch {}
+    const es = openProgressStream(taskId);
+    esRef = es;
+    isCompressing = true;
+    es.onmessage = (ev) => {
+      try { const data = JSON.parse(ev.data);
+        if (data.type === 'progress') { progress = data.progress; }
+        if (data.type === 'log' && data.message) { logLines = [data.message, ...logLines].slice(0, 500); }
+        if (data.type === 'done') { 
+          doneStats = data.stats; 
+          progress = 100;
+          isCompressing = false;
+          try { esRef?.close(); } catch {}
+          // Play sound when done if enabled
+          if (playSoundWhenDone) {
+            const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZURE');
+            audio.play().catch(() => {});
+          }
+          // Auto-download if enabled
+          if (autoDownload && doneStats?.output_filename) {
+            setTimeout(() => {
+              window.location.href = downloadUrl(doneStats.output_filename);
+            }, 500);
+          }
+        }
+        if (data.type === 'error') { logLines = [data.message, ...logLines]; isCompressing = false; try { esRef?.close(); } catch {} }
+      } catch {}
+    }
+    es.onerror = () => {
+      logLines = ['[SSE] Connection error: lost progress stream.', ...logLines].slice(0, 500);
+      errorText = 'Lost connection to progress stream. Check server/network and try again.';
+      isCompressing = false;
+      try { esRef?.close(); } catch {}
     }
   }
 
@@ -273,6 +327,39 @@
     <a href="/settings" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors text-sm">
       ⚙️ Settings
     </a>
+  </div>
+
+  <!-- System capabilities -->
+  <div class="card">
+    <div class="grid sm:grid-cols-2 gap-4">
+      <div>
+        <h3 class="font-semibold mb-2">System</h3>
+        {#if sysCaps}
+          <p class="text-sm">CPU: {sysCaps.cpu?.model || 'Unknown'} ({sysCaps.cpu?.cores_physical}C/{sysCaps.cpu?.cores_logical}T)</p>
+          <p class="text-sm">Memory: {sysCaps.memory?.available_gb} GB free / {sysCaps.memory?.total_gb} GB</p>
+          <p class="text-sm">Hardware: <span class="inline-flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full" style={`background-color:${getCodecColor(hardwareType)}`}></span>{hardwareType.toUpperCase()}</span></p>
+        {:else if sysCapsError}
+          <p class="text-sm text-amber-400">{sysCapsError}</p>
+        {:else}
+          <p class="text-sm opacity-70">Detecting system capabilities…</p>
+        {/if}
+      </div>
+      <div>
+        <h3 class="font-semibold mb-2">GPUs</h3>
+        {#if sysCaps?.gpus?.length}
+          <ul class="text-sm space-y-1">
+            {#each sysCaps.gpus as g}
+              <li>#{g.index} {g.name} — {g.memory_used_gb}/{g.memory_total_gb} GB</li>
+            {/each}
+          </ul>
+          {#if sysCaps.nvidia_driver}
+            <p class="text-xs opacity-70 mt-1">NVIDIA Driver: {sysCaps.nvidia_driver}</p>
+          {/if}
+        {:else}
+          <p class="text-sm opacity-70">No dedicated GPUs detected</p>
+        {/if}
+      </div>
+    </div>
   </div>
 
   <div class="card">
@@ -457,6 +544,12 @@
   {#if errorText}
     <div class="card border-red-500">
       <p class="text-red-400">{errorText}</p>
+      {#if taskId && !doneStats}
+        <div class="mt-2 flex gap-2 items-center">
+          <button class="btn" on:click={reconnectStream}>Reconnect to progress</button>
+          <span class="text-xs opacity-70">This just reopens the live log/progress stream; the job may still be running on the server.</span>
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -481,7 +574,11 @@
       {#if doneStats}
         <div class="mt-4 text-sm">
           <p>Completed. Final size: {doneStats.final_size_mb} MB</p>
-          <a class="btn inline-block mt-2" href={downloadUrl(taskId)} target="_blank">Download</a>
+          {#if doneStats.output_filename}
+            <a class="btn inline-block mt-2" href={downloadUrl(doneStats.output_filename)} target="_blank">Download</a>
+          {:else}
+            <a class="btn inline-block mt-2" href={downloadUrl(taskId)} target="_blank">Download</a>
+          {/if}
         </div>
       {/if}
     </div>
@@ -521,6 +618,21 @@
     </div>
     <div class="mt-2">
       <a class="underline text-xs hover:text-rose-300" href="https://paypal.me/jasonselsley" target="_blank" rel="noopener noreferrer">paypal.me/jasonselsley</a>
+    </div>
+  </div>
+{/if}
+
+{#if isUploading || isCompressing}
+  <div class="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center">
+    <div class="bg-gray-900 border border-gray-700 rounded-lg p-4 shadow-xl flex items-center gap-3">
+      <div class="h-6 w-6 rounded-full border-2 border-gray-600 border-t-indigo-500 animate-spin"></div>
+      <div class="text-sm">
+        {#if isUploading}
+          <div>Uploading… {uploadProgress}%</div>
+        {:else if isCompressing}
+          <div>Compressing… {progress}%</div>
+        {/if}
+      </div>
     </div>
   </div>
 {/if}
