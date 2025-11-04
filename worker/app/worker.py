@@ -4,6 +4,7 @@ import os
 import shlex
 import subprocess
 import time
+import logging
 from pathlib import Path
 from typing import Dict
 from redis import Redis
@@ -11,10 +12,23 @@ from redis import Redis
 from .celery_app import celery_app
 from .utils import ffprobe_info, calc_bitrates
 from .hw_detect import get_hw_info, map_codec_to_hw
+from .startup_tests import run_startup_tests
+
+logger = logging.getLogger(__name__)
 
 REDIS = None
 # Cache encoder test results to avoid slow init tests on every job
 ENCODER_TEST_CACHE: Dict[str, bool] = {}
+
+# Run startup tests once on module load
+try:
+    logger.info("Running encoder validation tests at startup...")
+    _hw_info = get_hw_info()
+    ENCODER_TEST_CACHE = run_startup_tests(_hw_info)
+    logger.info(f"Encoder cache populated with {len(ENCODER_TEST_CACHE)} entries.")
+except Exception as e:
+    logger.error(f"Startup encoder tests failed: {e}")
+    # Continue anyway; tests will run on-demand if cache is empty
 
 def _redis() -> Redis:
     global REDIS
@@ -65,76 +79,14 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
     # Map requested codec to actual encoder and flags
     actual_encoder, v_flags, init_hw_flags = map_codec_to_hw(video_codec, hw_info)
     
-    # Validate encoder is available and can be initialized
-    def is_encoder_available(encoder_name: str) -> bool:
-        """Check if encoder is available in ffmpeg."""
-        try:
-            result = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-encoders"],
-                capture_output=True,
-                text=True,
-                timeout=2
-            )
-            return encoder_name in result.stdout
-        except Exception:
-            return False
-    
-    def test_encoder_init(encoder_name: str, hw_flags: list) -> bool:
-        """Test if encoder can actually be initialized (not just listed)."""
-        try:
-            # Try to initialize encoder with a minimal command
-            # This will fail fast if the hardware isn't accessible
-            # Note: Use 256x256 minimum size - NVENC requires at least 128x128, some encoders need more
-            cmd = ["ffmpeg", "-hide_banner"]
-            cmd.extend(hw_flags)  # Hardware init flags
-            cmd.extend([
-                "-f", "lavfi", "-i", "color=black:s=256x256:d=0.1",
-                "-c:v", encoder_name,
-                "-t", "0.1",
-                "-frames:v", "1",
-                "-f", "null", "-"
-            ])
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=10  # Increased timeout for slower systems
-            )
-            # Check for specific errors that indicate driver/library issues
-            stderr_lower = result.stderr.lower()
-            
-            # These are definite failures - hardware not accessible
-            if "operation not permitted" in stderr_lower:
-                _publish(self.request.id, {"type": "log", "message": f"Encoder test failed: Operation not permitted"})
-                return False
-            if "could not open encoder" in stderr_lower:
-                _publish(self.request.id, {"type": "log", "message": f"Encoder test failed: Could not open encoder"})
-                return False
-            if "no device found" in stderr_lower:
-                _publish(self.request.id, {"type": "log", "message": f"Encoder test failed: No device found"})
-                return False
-            if "failed to set value" in stderr_lower and "init_hw_device" in stderr_lower:
-                _publish(self.request.id, {"type": "log", "message": f"Encoder test failed: Hardware device initialization failed"})
-                return False
-            if "cannot load" in stderr_lower and ".so" in stderr_lower:
-                _publish(self.request.id, {"type": "log", "message": f"Encoder test failed: Missing library ({result.stderr.split('Cannot load')[1].split()[0] if 'Cannot load' in result.stderr else 'unknown'})"})
-                return False
-            
-            # Success: either return code 0, or non-zero but without hardware access errors
-            # (some formats might cause non-zero but encoder itself initialized fine)
-            return True
-        except subprocess.TimeoutExpired:
-            _publish(self.request.id, {"type": "log", "message": f"Encoder test timeout (> 10s) - assuming encoder works"})
-            return True  # Timeout suggests it's working but slow, let it try
-        except Exception as e:
-            _publish(self.request.id, {"type": "log", "message": f"Encoder test exception: {str(e)}"})
-            return False
-    
-    # Fallback to CPU if hardware encoder not available or can't initialize
+    # Fallback to CPU if hardware encoder not available or failed startup tests
     if actual_encoder not in ("libx264", "libx265", "libaom-av1"):
-        # Check availability (fast)
-        if not is_encoder_available(actual_encoder):
-            _publish(self.request.id, {"type": "log", "message": f"Warning: {actual_encoder} not available, falling back to CPU"})
+        global ENCODER_TEST_CACHE
+        cache_key = f"{actual_encoder}:{':'.join(init_hw_flags)}"
+        
+        # If not in cache or failed test, fall back to CPU
+        if cache_key not in ENCODER_TEST_CACHE or not ENCODER_TEST_CACHE[cache_key]:
+            _publish(self.request.id, {"type": "log", "message": f"Warning: {actual_encoder} unavailable or failed startup test, falling back to CPU"})
             
             # Determine CPU fallback based on codec type
             if "h264" in actual_encoder:
@@ -147,29 +99,6 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
                 actual_encoder = "libaom-av1"
                 v_flags = ["-pix_fmt", "yuv420p"]
             init_hw_flags = []
-        else:
-            # Check cache or run init test (slow, only once per encoder)
-            global ENCODER_TEST_CACHE
-            cache_key = f"{actual_encoder}:{':'.join(init_hw_flags)}"
-            if cache_key not in ENCODER_TEST_CACHE:
-                _publish(self.request.id, {"type": "log", "message": f"Testing {actual_encoder} initialization (cached after first run)…"})
-                ENCODER_TEST_CACHE[cache_key] = test_encoder_init(actual_encoder, init_hw_flags)
-            
-            if not ENCODER_TEST_CACHE[cache_key]:
-                _publish(self.request.id, {"type": "log", "message": f"Warning: {actual_encoder} failed initialization test (driver/library issue), falling back to CPU"})
-                
-                # Determine CPU fallback based on codec type
-                if "h264" in actual_encoder:
-                    actual_encoder = "libx264"
-                    v_flags = ["-pix_fmt", "yuv420p", "-profile:v", "high"]
-                elif "hevc" in actual_encoder or "h265" in actual_encoder:
-                    actual_encoder = "libx265"
-                    v_flags = ["-pix_fmt", "yuv420p"]
-                else:  # AV1
-                    actual_encoder = "libaom-av1"
-                    v_flags = []
-                
-                init_hw_flags = []  # Clear hardware init flags
     
     _publish(self.request.id, {"type": "log", "message": f"Using encoder: {actual_encoder} (requested: {video_codec})"})
     _publish(self.request.id, {"type": "log", "message": "Starting compression…"})
