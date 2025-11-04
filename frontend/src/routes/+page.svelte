@@ -514,23 +514,37 @@
 
   // Finalization watchdog: start/stop a short poller if we hit 100% but 'ready' hasn't arrived
   $: (async () => {
-    const shouldPoll = !!taskId && displayedProgress >= 100 && !isReady && !doneStats;
+    const shouldPoll = !!taskId && displayedProgress >= 100 && !isReady && !doneStats && isCompressing;
     if (shouldPoll && !finalizePoller) {
+      console.log('[Watchdog] Starting finalization poll for', taskId);
       finalizePoller = setInterval(async () => {
         if (!taskId) return;
         try {
-          const res = await fetch(`${downloadUrl(taskId)}?wait=1`, { method: 'HEAD', cache: 'no-store' });
-          if (res.ok) {
-            isReady = true;
-            isFinalizing = false;
-            showTryDownload = false;
-            clearInterval(finalizePoller);
-            finalizePoller = null;
-            if (autoDownload) setTimeout(() => { window.location.href = downloadUrl(taskId!); }, 150);
+          // Use status endpoint to check readiness without triggering download
+          const statusRes = await fetch(`/api/jobs/${taskId}/status`, { cache: 'no-store' });
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            console.log('[Watchdog] Status check:', statusData);
+            // Check if file is ready by attempting download with very short wait
+            if (statusData.state === 'SUCCESS' || statusData.detail === 'ready') {
+              const dlRes = await fetch(`${downloadUrl(taskId)}?wait=0.5`, { method: 'HEAD', cache: 'no-store' });
+              if (dlRes.ok) {
+                console.log('[Watchdog] File ready! Transitioning...');
+                isReady = true;
+                isFinalizing = false;
+                showTryDownload = false;
+                clearInterval(finalizePoller);
+                finalizePoller = null;
+                if (autoDownload) setTimeout(() => { window.location.href = downloadUrl(taskId!); }, 150);
+              }
+            }
           }
-        } catch {}
-      }, 1000);
+        } catch (e) {
+          console.log('[Watchdog] Poll error:', e);
+        }
+      }, 1500);
     } else if (!shouldPoll && finalizePoller) {
+      console.log('[Watchdog] Stopping finalization poll');
       clearInterval(finalizePoller);
       finalizePoller = null;
     }
