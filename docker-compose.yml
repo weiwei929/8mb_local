@@ -10,16 +10,16 @@ services:
       - ./.env:/app/.env  # optional custom settings
     environment:
       - REDIS_URL=redis://127.0.0.1:6379/0
-    # Optional: enable NVIDIA GPU acceleration
-    # environment:
-    #   - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    # Enable NVIDIA GPU acceleration (Docker Desktop / Linux with nvidia-container-toolkit)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     # Optional: enable VAAPI on Linux (Intel/AMD)
     # devices:
     #   - "/dev/dri:/dev/dri"

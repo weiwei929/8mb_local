@@ -95,6 +95,7 @@
   let readyFilename: string | null = null;
   let showTryDownload: boolean = false;
   let readyTimer: any = null;
+  let tryDownloading: boolean = false; // UI state for Try Download button
   // ETA / status helpers
   let startedAt: number | null = null;
   let etaSeconds: number | null = null;
@@ -104,6 +105,7 @@
   let decodeMethod: string | null = null;
   let encodeMethod: string | null = null;
   let isFinalizing = false; // Track if we're in the finalization phase
+  let finalizePoller: any = null; // interval id for readiness polling during finalizing
   // Support widget state
   let showSupport = false;
   function toggleSupport(){ showSupport = !showSupport; }
@@ -414,6 +416,7 @@
             displayedProgress = Math.max(displayedProgress, 100);
             isFinalizing = false;
             showTryDownload = false;
+            tryDownloading = false;
             if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }
             // Auto-download if enabled
             if (autoDownload && taskId) {
@@ -457,6 +460,7 @@
             isCompressing = false;
             isFinalizing = false;
             showTryDownload = false;
+            tryDownloading = false;
             if (readyTimer) { clearTimeout(readyTimer); readyTimer = null; }
             startedAt = null; etaSeconds = null; etaLabel = null; currentSpeedX = null; hasProgress = false;
             try { esRef?.close(); } catch {}
@@ -490,6 +494,64 @@
       errorText = `Compression failed: ${err.message || err}`;
     }
   }
+
+  // Try Download handler with smart polling to avoid opening an error JSON page
+  async function tryDownloadNow(){
+    if (!taskId) return;
+    tryDownloading = true;
+    showTryDownload = true;
+    const url = downloadUrl(taskId);
+    let attempt = 0;
+    let ok = false;
+    while (attempt < 8) { // ~ up to ~6-8 seconds with backoff
+      try {
+        const u = `${url}?wait=1`;
+        const res = await fetch(u, { method: 'HEAD', cache: 'no-store' });
+        if (res.ok) {
+          ok = true;
+          break;
+        }
+      } catch {}
+      const backoff = Math.min(200 * Math.pow(1.7, attempt), 1500);
+      await new Promise(r => setTimeout(r, backoff));
+      attempt++;
+    }
+    if (ok) {
+      isReady = true;
+      isFinalizing = false;
+      tryDownloading = false;
+      showTryDownload = false;
+      // Trigger the actual download in the same tab
+      window.location.href = url;
+    } else {
+      // Keep the button, but indicate we'll keep trying briefly in the background
+      tryDownloading = false;
+    }
+  }
+
+  // Finalization watchdog: start/stop a short poller if we hit 100% but 'ready' hasn't arrived
+  $: (async () => {
+    const shouldPoll = !!taskId && displayedProgress >= 100 && !isReady && !doneStats;
+    if (shouldPoll && !finalizePoller) {
+      finalizePoller = setInterval(async () => {
+        if (!taskId) return;
+        try {
+          const res = await fetch(`${downloadUrl(taskId)}?wait=1`, { method: 'HEAD', cache: 'no-store' });
+          if (res.ok) {
+            isReady = true;
+            isFinalizing = false;
+            showTryDownload = false;
+            clearInterval(finalizePoller);
+            finalizePoller = null;
+            if (autoDownload) setTimeout(() => { window.location.href = downloadUrl(taskId!); }, 150);
+          }
+        } catch {}
+      }, 1000);
+    } else if (!shouldPoll && finalizePoller) {
+      clearInterval(finalizePoller);
+      finalizePoller = null;
+    }
+  })();
 
   function reconnectStream(){
     if (!taskId) return;
@@ -532,7 +594,7 @@
 
   // Remove older reset; replace with one that clears readiness flags too
   
-  function reset(){ file=null; uploadedFileName=null; jobInfo=null; taskId=null; progress=0; displayedProgress=0; logLines=[]; doneStats=null; warnText=null; errorText=null; isUploading=false; isCompressing=false; isFinalizing=false; decodeMethod=null; encodeMethod=null; isReady=false; readyFilename=null; showTryDownload=false; if (readyTimer) { clearTimeout(readyTimer); readyTimer=null; } try { esRef?.close(); } catch {} }
+  function reset(){ file=null; uploadedFileName=null; jobInfo=null; taskId=null; progress=0; displayedProgress=0; logLines=[]; doneStats=null; warnText=null; errorText=null; isUploading=false; isCompressing=false; isFinalizing=false; decodeMethod=null; encodeMethod=null; isReady=false; readyFilename=null; showTryDownload=false; if (readyTimer) { clearTimeout(readyTimer); readyTimer=null; } if (finalizePoller) { clearInterval(finalizePoller); finalizePoller=null; } try { esRef?.close(); } catch {} }
   $: (() => { /* clear ETA when not compressing */ if (!isCompressing) { startedAt = null; etaSeconds = null; etaLabel = null; currentSpeedX = null; hasProgress = false; isFinalizing = false; } })();
 
   async function onCancel(){
@@ -858,7 +920,9 @@
       {#if !isReady && !doneStats && showTryDownload}
         <div class="mt-4 text-sm">
           <p>Finalizing… You can try downloading now.</p>
-          <a class="btn inline-block mt-2" href={downloadUrl(taskId)} target="_blank">Try Download</a>
+          <button class="btn inline-block mt-2" on:click={tryDownloadNow} disabled={tryDownloading}>
+            {tryDownloading ? 'Trying…' : 'Try Download'}
+          </button>
         </div>
       {/if}
 

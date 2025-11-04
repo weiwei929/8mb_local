@@ -356,7 +356,7 @@ async def job_status(task_id: str):
 
 
 @app.get("/api/jobs/{task_id}/download", dependencies=[Depends(basic_auth)])
-async def download(task_id: str):
+async def download(task_id: str, wait: float | None = None):
     res = celery_app.AsyncResult(task_id)
     state = res.state or "UNKNOWN"
     meta = res.info if isinstance(res.info, dict) else {}
@@ -369,6 +369,35 @@ async def download(task_id: str):
                 path = cached
         except Exception:
             pass
+
+    # Optional short wait window to reduce races when the user clicks immediately at 100%
+    if wait and (not path or not os.path.isfile(str(path))):
+        try:
+            deadline = time.time() + max(0.1, min(float(wait), 5.0))
+        except Exception:
+            deadline = time.time() + 1.0
+        while time.time() < deadline:
+            # Re-check Celery meta
+            try:
+                res = celery_app.AsyncResult(task_id)
+                meta = res.info if isinstance(res.info, dict) else meta
+                p2 = (meta or {}).get("output_path")
+                if p2:
+                    path = p2
+            except Exception:
+                pass
+            # Re-check Redis ready cache
+            if not path:
+                try:
+                    cached = await redis.get(f"ready:{task_id}")
+                    if cached:
+                        path = cached
+                except Exception:
+                    pass
+            # If file now exists, break
+            if path and os.path.isfile(str(path)):
+                break
+            await asyncio.sleep(0.2)
     # If the file exists, serve it immediately
     if path and os.path.isfile(path):
         filename = os.path.basename(path)
@@ -398,8 +427,10 @@ async def download(task_id: str):
     except Exception:
         pass
 
+    # Suggest client retry timing to improve UX when polling
+    headers = {"Retry-After": "1", "Cache-Control": "no-store"}
     # Keep status code as 404 for backward compatibility with current UI
-    raise HTTPException(status_code=404, detail=detail)
+    raise HTTPException(status_code=404, detail=detail, headers=headers)
 
 
 @app.post("/api/jobs/{task_id}/cancel")
