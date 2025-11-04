@@ -15,22 +15,43 @@ def read_env_file() -> dict:
     if not ENV_FILE.exists():
         return {}
     
+    # Check if it's a directory (common Docker mount issue)
+    if ENV_FILE.is_dir():
+        print(f"WARNING: {ENV_FILE} is a directory, not a file. Falling back to environment variables only.")
+        print("To fix: Remove the directory and mount a proper .env file, or don't mount .env at all.")
+        return {}
+    
     env_vars = {}
-    with open(ENV_FILE, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#') and '=' in line:
-                key, value = line.split('=', 1)
-                env_vars[key.strip()] = value.strip()
+    try:
+        with open(ENV_FILE, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    env_vars[key.strip()] = value.strip()
+    except Exception as e:
+        print(f"WARNING: Failed to read {ENV_FILE}: {e}")
+        return {}
+    
     return env_vars
 
 
 def write_env_file(env_vars: dict):
     """Write env vars to .env file"""
-    with open(ENV_FILE, 'w') as f:
-        for key, value in env_vars.items():
-            f.write(f"{key}={value}\n")
-    os.chmod(ENV_FILE, 0o600)
+    # Check if it's a directory (common Docker mount issue)
+    if ENV_FILE.exists() and ENV_FILE.is_dir():
+        raise RuntimeError(f"{ENV_FILE} is a directory. Cannot write settings. Remove the directory or fix your Docker mount.")
+    
+    # Create parent directory if needed
+    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        with open(ENV_FILE, 'w') as f:
+            for key, value in env_vars.items():
+                f.write(f"{key}={value}\n")
+        os.chmod(ENV_FILE, 0o600)
+    except Exception as e:
+        raise RuntimeError(f"Failed to write {ENV_FILE}: {e}")
 
 
 def get_auth_settings() -> dict:
