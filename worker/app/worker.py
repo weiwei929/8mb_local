@@ -132,6 +132,11 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
     
     _publish(self.request.id, {"type": "log", "message": f"Using encoder: {actual_encoder} (requested: {video_codec})"})
     _publish(self.request.id, {"type": "log", "message": "Starting compression…"})
+    # Mark task as started so queue shows running immediately
+    try:
+        self.update_state(state="STARTED", meta={"progress": 0.0, "phase": "encoding"})
+    except Exception:
+        pass
     
     # Start timing from here (actual encoding, not initialization)
     start_ts = time.time()
@@ -268,12 +273,30 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
                 if duration_sec > 0:
                     duration_opts = ["-t", str(duration_sec)]
                     _publish(self.request.id, {"type": "log", "message": f"Trimming: duration {duration_sec:.2f}s (end at {end_time})"})
+                    # Use trimmed duration for accurate progress scaling
+                    try:
+                        duration = float(duration_sec)
+                    except Exception:
+                        pass
             except Exception as e:
                 _publish(self.request.id, {"type": "log", "message": f"Warning: Could not parse trim times: {e}"})
         else:
             # No start time, use -to
             duration_opts = ["-to", str(end_time)]
             _publish(self.request.id, {"type": "log", "message": f"Trimming: end at {end_time}"})
+            # If only end_time provided, set duration to end timestamp if parsable
+            try:
+                et = str(end_time)
+                if ':' in et:
+                    parts = et.split(':')
+                    if len(parts) == 3:
+                        duration = int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+                    elif len(parts) == 2:
+                        duration = int(parts[0]) * 60 + float(parts[1])
+                else:
+                    duration = float(et)
+            except Exception:
+                pass
 
     # Decide decoder strategy based on input codec and runtime capability
     in_codec = info.get("video_codec")
@@ -438,20 +461,29 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
                     emitted_initial_progress = True
                     if last_progress < 0.01:
                         last_progress = 0.01
-                        _publish(self.request.id, {"type": "progress", "progress": 1.0})
+                        _publish(self.request.id, {"type": "progress", "progress": 1.0, "phase": "encoding"})
+                        try:
+                            self.update_state(state="PROGRESS", meta={"progress": 1.0, "phase": "encoding"})
+                        except Exception:
+                            pass
                 if "=" in line:
                     key, _, val = line.partition("=")
                     if key == "out_time_ms":
                         try:
                             ms = int(val)
                             if duration > 0:
-                                # Use 0-99% for encoding (the actual work), reserve only 99-100% for finalization
+                                # Use 0-96% for encoding (reserve 96-100% for finalization & file handling)
                                 p = min(max(ms / 1000.0 / duration, 0.0), 1.0)
-                                scaled_progress = p * 0.99  # 0.0 to 0.99 (99%)
-                                # Update every 0.5% or when reaching 99%
-                                if (scaled_progress - last_progress) >= 0.005 or scaled_progress >= 0.989:
+                                scaled_progress = p * 0.96  # 0.0 to 0.96
+                                # Update every 0.5% or on nearing 96%
+                                if (scaled_progress - last_progress) >= 0.005 or scaled_progress >= 0.959:
                                     last_progress = scaled_progress
-                                    _publish(self.request.id, {"type": "progress", "progress": round(scaled_progress*100, 2), "phase": "encoding"})
+                                    prog = round(scaled_progress*100, 2)
+                                    _publish(self.request.id, {"type": "progress", "progress": prog, "phase": "encoding"})
+                                    try:
+                                        self.update_state(state="PROGRESS", meta={"progress": prog, "phase": "encoding"})
+                                    except Exception:
+                                        pass
                         except Exception:
                             pass
                     elif key in ("bitrate", "total_size", "speed"):
@@ -530,8 +562,12 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         _publish(self.request.id, {"type": "error", "message": msg})
         raise RuntimeError(msg)
 
-    # Encoding complete - move to 99% and start finalization
-    _publish(self.request.id, {"type": "progress", "progress": 99.0, "phase": "finalizing"})
+    # Encoding complete - move to 96% and start finalization steps
+    _publish(self.request.id, {"type": "progress", "progress": 96.0, "phase": "finalizing"})
+    try:
+        self.update_state(state="PROGRESS", meta={"progress": 96.0, "phase": "finalizing"})
+    except Exception:
+        pass
     _publish(self.request.id, {"type": "log", "message": "Encoding complete. Finalizing output..."})
 
     # CRITICAL: Wait for file to be fully written and readable (especially on networked/slow filesystems)
@@ -561,8 +597,14 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         final_size = 0
     
     _publish(self.request.id, {"type": "log", "message": f"Output verified: {final_size / (1024*1024):.2f} MB"})
+    # Bump progress as we complete verification
+    _publish(self.request.id, {"type": "progress", "progress": 97.5, "phase": "finalizing"})
+    try:
+        self.update_state(state="PROGRESS", meta={"progress": 97.5, "phase": "finalizing"})
+    except Exception:
+        pass
 
-    # Still 99% - checking file size and preparing for possible retry
+    # Checking file size and preparing for possible retry
     final_size_mb = round(final_size / (1024*1024), 2) if final_size else 0
 
     # Make the file downloadable immediately after encode finishes
@@ -609,6 +651,10 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         
         # Reset progress for retry
         _publish(self.request.id, {"type": "progress", "progress": 1.0, "phase": "encoding"})
+        try:
+            self.update_state(state="PROGRESS", meta={"progress": 1.0, "phase": "encoding"})
+        except Exception:
+            pass
         
         # Re-run the encoding with adjusted bitrate by modifying cmd
         # Find and replace the bitrate values in the original command
@@ -669,6 +715,13 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         "final_size_mb": final_size_mb,
     }
     
+    # Advance to 99% before final save
+    _publish(self.request.id, {"type": "progress", "progress": 99.0, "phase": "finalizing"})
+    try:
+        self.update_state(state="PROGRESS", meta={"progress": 99.0, "phase": "finalizing"})
+    except Exception:
+        pass
+
     # Add to history if enabled
     try:
         # Default ON if variable not set
@@ -718,7 +771,9 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
     
     # 100% - Complete!
     _publish(self.request.id, {"type": "progress", "progress": 100.0, "phase": "done"})
-    
-    self.update_state(state="SUCCESS", meta={"output_path": output_path, "progress": 100.0, "detail": "done", **stats})
+    try:
+        self.update_state(state="SUCCESS", meta={"output_path": output_path, "progress": 100.0, "detail": "done", **stats})
+    except Exception:
+        pass
     _publish(self.request.id, {"type": "done", "stats": stats})
     return stats

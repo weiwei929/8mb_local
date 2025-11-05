@@ -715,7 +715,16 @@ docker logs -f 8mblocal
 - Consider HTTPS termination and stronger auth for public deployments
 
 ## License
-GNU GPLv3 - See LICENSE file for details
+Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+
+You are free to use, share, and adapt this project for non-commercial purposes as long as you provide appropriate attribution.
+
+You are not allowed to use this project for commercial purposes under this license.
+
+Looking to use this project commercially?
+I offer a separate commercial license that grants you the right to use this project in your commercial products.
+
+Please contact me directly.
 
 ## Contributing
 Pull requests welcome! Please ensure Docker builds succeed and test with your GPU hardware.
