@@ -65,11 +65,7 @@ Data & files
 ## Configuration
 
 ### Environment Variables
-- `AUTH_ENABLED` (true|false) - Enable/disable authentication (can be changed in Settings UI)
-- `AUTH_USER` - Username for authentication (default: admin)
-- `AUTH_PASS` - Password for authentication
-- `FILE_RETENTION_HOURS` - Hours to keep uploaded/output files (default: 1)
-- `REDIS_URL` - Redis connection URL (default: `redis://127.0.0.1:6379/0`)
+ - `WORKER_CONCURRENCY` - Maximum concurrent compression jobs (default: 4, range: 1-20)
 - `BACKEND_HOST` - Backend bind address (default: 0.0.0.0)
 - `BACKEND_PORT` - Backend port (default: 8001)
 - `PUBLIC_BACKEND_URL` - Frontend API endpoint; leave unset to use same‑origin (recommended)
@@ -98,10 +94,51 @@ AUTH_ENABLED=false
 AUTH_USER=admin
 AUTH_PASS=changeme
 FILE_RETENTION_HOURS=1
+WORKER_CONCURRENCY=4
 REDIS_URL=redis://127.0.0.1:6379/0
 BACKEND_HOST=0.0.0.0
 BACKEND_PORT=8001
 ```
+
+## Using the app
+1. Drag & drop a video or Choose File.
+2. Pick a target size or enter a custom MB value, click Analyze (auto‑analyzes on drop).
+
+## Performance & Concurrency
+
+### Multiple Simultaneous Jobs
+8mb.local supports running multiple compression jobs in parallel. Configure the maximum number of concurrent jobs via:
+- **Settings UI**: Navigate to Settings → Worker Concurrency
+- **Environment Variable**: Set `WORKER_CONCURRENCY` in your `.env` file (default: 4)
+- **Docker Compose**: Add `WORKER_CONCURRENCY=10` to environment section
+
+**Important**: Container restart required after changing concurrency setting.
+
+### Hardware-Specific Recommendations
+
+| GPU Model | Recommended Concurrency | Notes |
+|-----------|------------------------|-------|
+| **Quadro RTX 4000 / RTX 3060+** | 6-10 jobs | Excellent NVENC throughput, handles high concurrency well |
+| **RTX 3090 / 4090** | 8-12 jobs | Top-tier NVENC performance, best for bulk processing |
+| **GTX 1660 / RTX 2060** | 3-5 jobs | Good NVENC performance for mid-range |
+| **GTX 1050 Ti / Entry-level** | 2-3 jobs | Basic NVENC, limited parallel capacity |
+| **CPU-only (libx264/libx265)** | 1-2 jobs per 4 cores | Very slow, high CPU usage |
+| **Intel/AMD VAAPI** | 4-8 jobs | Depends on iGPU/dGPU capabilities |
+
+### Performance Considerations
+- **NVENC Sessions**: Most NVIDIA GPUs support 2-3 native NVENC sessions, but driver patches/Pro GPUs allow unlimited
+- **Memory Usage**: Each job uses ~200-500MB RAM; monitor total system memory
+- **GPU Memory**: Each NVENC encode uses ~100-200MB VRAM
+- **Disk I/O**: Higher concurrency increases disk load; SSD recommended for 6+ concurrent jobs
+- **Thermal Throttling**: Monitor GPU temps with high concurrency (>80°C may cause slowdowns)
+
+### Queue Visualization
+The Queue page clearly shows which jobs are running simultaneously:
+- **Running jobs**: Blue pulsing lightning bolt (⚡), blue border, "RUNNING NOW" indicator
+- **Queued jobs**: Yellow "Waiting in queue" status
+- **Live progress**: Real-time progress updates for all running jobs
+
+Start with 4 concurrent jobs and gradually increase while monitoring GPU utilization and job completion times.
 
 ## Using the app
 1. Drag & drop a video or Choose File.

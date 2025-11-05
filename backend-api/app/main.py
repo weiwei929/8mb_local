@@ -1112,6 +1112,27 @@ async def update_retention_hours(req: RetentionHours, _auth=Depends(basic_auth))
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.get("/api/settings/worker-concurrency")
+async def get_worker_concurrency(_auth=Depends(basic_auth)):
+    """Get worker concurrency setting"""
+    return {"concurrency": settings_manager.get_worker_concurrency()}
+
+
+@app.put("/api/settings/worker-concurrency")
+async def update_worker_concurrency_endpoint(req: dict, _auth=Depends(basic_auth)):
+    """Update worker concurrency (requires container restart to take effect)"""
+    try:
+        concurrency = int(req.get("concurrency", 4))
+        settings_manager.update_worker_concurrency(concurrency)
+        return {
+            "status": "success",
+            "message": "Concurrency updated. Restart container for changes to take effect.",
+            "concurrency": concurrency
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # Serve pre-built frontend (for unified container deployment)
 frontend_build = Path("/app/frontend-build")
 if frontend_build.exists():

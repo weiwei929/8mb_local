@@ -72,6 +72,7 @@
 	let defaultPresetName: string | null = null;
 	let newPresetName: string = '';
 	let retentionHours: number = 1;
+	let workerConcurrency: number = 4;
 
 	  onMount(async () => {
 	try {
@@ -116,6 +117,10 @@
 	  try {
 		const rh = await fetch('/api/settings/retention-hours');
 		if (rh.ok) { const js = await rh.json(); retentionHours = js.hours ?? 1; }
+	  } catch {}
+	  try {
+		const wc = await fetch('/api/settings/worker-concurrency');
+		if (wc.ok) { const js = await wc.json(); workerConcurrency = js.concurrency ?? 4; }
 	  } catch {}
 
       // Startup info for first-boot banner
@@ -302,6 +307,19 @@
 		try { const res = await fetch('/api/settings/retention-hours', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ hours: retentionHours }) });
 			if (res.ok){ message='Saved retention hours'; } else { const d = await res.json(); error = d.detail || 'Failed to save retention'; }
 		} catch { error='Failed to save retention'; } finally { saving=false; }
+	}
+
+	// Worker concurrency
+	async function saveConcurrency(){
+		saving=true; error=''; message='';
+		if (workerConcurrency < 1) { error='Concurrency must be at least 1'; saving=false; return; }
+		if (workerConcurrency > 20) { error='Concurrency should not exceed 20'; saving=false; return; }
+		try { const res = await fetch('/api/settings/worker-concurrency', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ concurrency: workerConcurrency }) });
+			if (res.ok){ 
+				const d = await res.json();
+				message = d.message || 'Saved worker concurrency. Restart container to apply.'; 
+			} else { const d = await res.json(); error = d.detail || 'Failed to save concurrency'; }
+		} catch { error='Failed to save concurrency'; } finally { saving=false; }
 	}
 </script>
 
@@ -567,6 +585,58 @@
 				<button class="btn" on:click={saveRetention} disabled={saving}>{saving ? 'Saving…' : 'Save retention'}</button>
 			</div>
 		</div>
+	</div>
+
+	<!-- Worker Concurrency -->
+	<div class="card">
+		<div class="title">🚀 Worker Concurrency</div>
+		<p class="label" style="color:#9ca3af; margin-bottom: 12px;">
+			Maximum number of jobs that can compress simultaneously. Higher values allow more parallel jobs but require more GPU/CPU resources.
+		</p>
+		
+		<div class="row">
+			<div>
+				<label class="label">Max concurrent jobs</label>
+				<input class="input" type="number" min="1" max="20" bind:value={workerConcurrency} />
+			</div>
+			<div style="display:flex; align-items:flex-end">
+				<button class="btn" on:click={saveConcurrency} disabled={saving}>{saving ? 'Saving…' : 'Save concurrency'}</button>
+			</div>
+		</div>
+
+		<details style="margin-top: 12px; background: #1f2937; border: 1px solid #374151; border-radius: 8px; padding: 12px;">
+			<summary style="cursor: pointer; font-weight: 600; color: #60a5fa; user-select: none;">💡 Guidelines & Recommendations</summary>
+			<div style="margin-top: 8px; font-size: 14px; color: #d1d5db; line-height: 1.6;">
+				<p style="margin-bottom: 8px;"><strong>Hardware-based recommendations:</strong></p>
+				<ul style="margin-left: 20px; margin-bottom: 12px;">
+					<li><strong>Quadro RTX 4000 / RTX 3060+:</strong> 6-10 concurrent jobs (excellent NVENC throughput)</li>
+					<li><strong>GTX 1660 / RTX 2060:</strong> 3-5 concurrent jobs (good NVENC performance)</li>
+					<li><strong>GTX 1050 Ti / Entry-level:</strong> 2-3 concurrent jobs (basic NVENC)</li>
+					<li><strong>CPU-only encoding:</strong> 1-2 jobs per 4 CPU cores (very slow, high CPU usage)</li>
+					<li><strong>Intel/AMD VAAPI:</strong> 4-8 concurrent jobs (depends on iGPU/dGPU)</li>
+				</ul>
+				
+				<p style="margin-bottom: 8px;"><strong>Performance considerations:</strong></p>
+				<ul style="margin-left: 20px; margin-bottom: 12px;">
+					<li><strong>NVENC hardware limit:</strong> Most NVIDIA GPUs support 2-3 NVENC sessions natively, but driver unlocks allow unlimited sessions</li>
+					<li><strong>Memory usage:</strong> Each job uses ~200-500MB RAM. Monitor system memory with high concurrency</li>
+					<li><strong>GPU memory:</strong> Each NVENC encode uses ~100-200MB VRAM. Check available VRAM</li>
+					<li><strong>Disk I/O:</strong> Higher concurrency increases disk read/write. Use SSD for best performance</li>
+				</ul>
+
+				<p style="margin-bottom: 8px;"><strong>Testing recommendations:</strong></p>
+				<ul style="margin-left: 20px;">
+					<li>Start with 4 concurrent jobs and gradually increase while monitoring GPU utilization</li>
+					<li>Watch for thermal throttling on high concurrency (GPU temps >80°C)</li>
+					<li>Monitor job completion times - if they increase significantly, reduce concurrency</li>
+					<li>Check queue page during high load to see which jobs are running simultaneously</li>
+				</ul>
+
+				<p style="margin-top: 12px; padding: 8px; background: #fef3c7; color: #92400e; border-radius: 4px;">
+					⚠️ <strong>Note:</strong> Container restart required for changes to take effect. Current running jobs will complete before new setting applies.
+				</p>
+			</div>
+		</details>
 	</div>
 
   <!-- Defaults -->

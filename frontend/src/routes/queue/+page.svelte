@@ -197,16 +197,16 @@
     if (job.state === 'canceled') return '🚫 Canceled';
     if (job.state === 'queued') return '⏳ Waiting in queue';
     
-    // Running state - show phase
+    // Running state - show phase with indicator
     switch (job.phase) {
       case 'encoding':
-        return '🎬 Encoding video';
+        return '🎬 Encoding video (RUNNING NOW)';
       case 'finalizing':
-        return '⚙️ Finalizing output';
+        return '⚙️ Finalizing output (RUNNING NOW)';
       case 'done':
         return '✅ Complete';
       default:
-        return '▶️ Processing';
+        return '▶️ Processing (RUNNING NOW)';
     }
   }
 
@@ -298,15 +298,18 @@
     <!-- Active Jobs List -->
     <div class="space-y-4">
       {#each queueStatus.active_jobs as job (job.task_id)}
-        <div class="card">
+          <div class="card {job.state === 'running' ? 'border-2 border-blue-500 bg-blue-900/10' : ''}">
           <div class="flex items-start justify-between gap-4">
             <div class="flex-1 min-w-0">
               <!-- Job header -->
               <div class="flex items-center gap-2 mb-2">
+                  {#if job.state === 'running'}
+                    <span class="text-lg animate-pulse">⚡</span>
+                  {/if}
                 <span class="text-lg">{getStateIcon(job.state)}</span>
                 <span class="font-semibold {getStateColor(job.state)} uppercase text-sm">{job.state}</span>
                 <span class="text-xs text-gray-500">•</span>
-                <span class="text-sm text-gray-300">{getPhaseDisplay(job)}</span>
+                  <span class="text-sm {job.state === 'running' ? 'text-blue-300 font-semibold' : 'text-gray-300'}">{getPhaseDisplay(job)}</span>
                 <span class="text-xs text-gray-500">•</span>
                 <span class="text-sm text-gray-400 truncate">{job.filename}</span>
               </div>

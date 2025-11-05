@@ -427,3 +427,25 @@ def update_retention_hours(hours: int):
     data = _ensure_defaults()
     data['retention_hours'] = int(hours)
     _write_settings(data)
+
+
+def get_worker_concurrency() -> int:
+    """Get worker concurrency setting"""
+    env_vars = read_env_file()
+    try:
+        return int(os.getenv('WORKER_CONCURRENCY', env_vars.get('WORKER_CONCURRENCY', '4')))
+    except Exception:
+        return 4
+
+
+def update_worker_concurrency(concurrency: int):
+    """Update worker concurrency setting in .env file"""
+    if concurrency < 1:
+        raise ValueError("concurrency must be >= 1")
+    if concurrency > 20:
+        raise ValueError("concurrency should not exceed 20 for stability")
+    
+    env_vars = read_env_file()
+    env_vars['WORKER_CONCURRENCY'] = str(concurrency)
+    write_env_file(env_vars)
+    os.environ['WORKER_CONCURRENCY'] = str(concurrency)
