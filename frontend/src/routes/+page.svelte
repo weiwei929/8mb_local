@@ -892,6 +892,29 @@
     <button class="btn" on:click={reset} disabled={!file && !taskId}>Reset</button>
   </div>
 
+  <!-- Download Ready Card - Prominent when file is ready -->
+  {#if taskId && (isReady || doneStats)}
+    <div class="card bg-gradient-to-r from-green-900/30 to-blue-900/30 border-2 border-green-500/50">
+      <div class="flex items-center justify-between gap-4 flex-wrap">
+        <div class="flex-1">
+          <h3 class="text-lg font-bold text-green-400 mb-1">✓ Compression Complete!</h3>
+          {#if doneStats}
+            <p class="text-sm text-gray-300">Final size: <span class="font-semibold text-white">{doneStats.final_size_mb} MB</span></p>
+          {:else}
+            <p class="text-sm text-gray-300">Your file is ready to download</p>
+          {/if}
+        </div>
+        <a 
+          class="btn bg-green-600 hover:bg-green-700 text-white font-bold px-8 py-3 text-lg shadow-lg"
+          href={downloadUrl(taskId)} 
+          target="_blank"
+        >
+          ⬇️ Download
+        </a>
+      </div>
+    </div>
+  {/if}
+
   {#if taskId}
     <div class="card">
       {#if decodeMethod || encodeMethod}
@@ -910,32 +933,20 @@
           <span class="text-gray-400">Saving metadata...</span>
         {/if}
       </div>
-      <details class="mt-3" open>
-        <summary>FFmpeg log</summary>
-        <pre class="mt-2 text-xs whitespace-pre-wrap">{logLines.join('\n')}</pre>
-      </details>
 
-      {#if isReady && !doneStats}
-        <div class="mt-4 text-sm">
-          <p>Ready to download.</p>
-          <a class="btn inline-block mt-2" href={downloadUrl(taskId)} target="_blank">Download</a>
-        </div>
-      {/if}
       {#if !isReady && !doneStats && showTryDownload}
-        <div class="mt-4 text-sm">
-          <p>Finalizing… You can try downloading now.</p>
+        <div class="mt-4 text-sm bg-amber-900/20 border border-amber-600/30 rounded p-3">
+          <p class="text-amber-300">Finalizing… You can try downloading now.</p>
           <button class="btn inline-block mt-2" on:click={tryDownloadNow} disabled={tryDownloading}>
             {tryDownloading ? 'Trying…' : 'Try Download'}
           </button>
         </div>
       {/if}
 
-      {#if doneStats}
-        <div class="mt-4 text-sm">
-          <p>Completed. Final size: {doneStats.final_size_mb} MB</p>
-          <a class="btn inline-block mt-2" href={downloadUrl(taskId)} target="_blank">Download</a>
-        </div>
-      {/if}
+      <details class="mt-3">
+        <summary class="cursor-pointer">FFmpeg log</summary>
+        <pre class="mt-2 text-xs whitespace-pre-wrap">{logLines.join('\n')}</pre>
+      </details>
     </div>
   {/if}
 
