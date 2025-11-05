@@ -946,6 +946,23 @@ async def system_encoder_tests():
         }
 
 
+@app.post("/api/system/encoder-tests/rerun", dependencies=[Depends(basic_auth)])
+async def rerun_encoder_tests():
+    """Trigger a fresh run of encoder/decoder startup tests on the worker and return updated results."""
+    try:
+        # Kick off worker-side tests and wait for completion (bounded timeout)
+        task = celery_app.send_task("worker.worker.run_hardware_tests")
+        try:
+            _ = task.get(timeout=90)
+        except Exception:
+            # Continue even if we time out; we will still return current cached results
+            pass
+        # Return the same payload as GET /api/system/encoder-tests
+        return await system_encoder_tests()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/diagnostics/gpu", dependencies=[Depends(basic_auth)])
 async def gpu_diagnostics():
     """Run basic GPU checks inside the container to validate NVIDIA and NVENC.

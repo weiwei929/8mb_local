@@ -14,14 +14,50 @@ logger = logging.getLogger(__name__)
 
 def get_gpu_env():
     """
-    Get environment with NVIDIA GPU variables for subprocess calls.
-    Critical: subprocess.run() does NOT inherit NVIDIA_DRIVER_CAPABILITIES by default.
+    Get environment with NVIDIA GPU variables and library paths for subprocess calls.
+    Includes LD_LIBRARY_PATH locations needed for CUDA on WSL2 and NVIDIA toolkit.
     """
     env = os.environ.copy()
     # Ensure NVIDIA variables are set for GPU access
     env['NVIDIA_VISIBLE_DEVICES'] = env.get('NVIDIA_VISIBLE_DEVICES', 'all')
     env['NVIDIA_DRIVER_CAPABILITIES'] = env.get('NVIDIA_DRIVER_CAPABILITIES', 'compute,video,utility')
+    # Add common library locations (non-destructive append)
+    lib_paths = [
+        '/usr/local/nvidia/lib64',
+        '/usr/local/nvidia/lib',
+        '/usr/local/cuda/lib64',
+        '/usr/local/cuda/lib',
+        '/usr/lib/wsl/lib',  # WSL2 libcuda.so location
+        '/usr/lib/x86_64-linux-gnu',
+    ]
+    existing = env.get('LD_LIBRARY_PATH', '')
+    add = ':'.join(p for p in lib_paths if p)
+    env['LD_LIBRARY_PATH'] = (existing + (':' if existing and add else '') + add) if (existing or add) else ''
     return env
+
+def _ffmpeg_has_nvenc(env: dict) -> bool:
+    try:
+        res = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True, timeout=5, env=env)
+        out = (res.stdout or "") + "\n" + (res.stderr or "")
+        return any(tok in out for tok in ["h264_nvenc", "hevc_nvenc", "av1_nvenc"]) and res.returncode == 0
+    except Exception:
+        return False
+
+def _wait_for_nv_runtime_ready(timeout_s: float = 30.0, interval_s: float = 2.0) -> bool:
+    """Wait until ffmpeg reports nvenc encoders are available, or timeout."""
+    env = get_gpu_env()
+    import time
+    start = time.time()
+    attempt = 1
+    while time.time() - start < timeout_s:
+        if _ffmpeg_has_nvenc(env):
+            logger.info(f"✅ NV runtime ready (attempt {attempt})")
+            return True
+        logger.warning(f"NV runtime not ready yet (attempt {attempt}) - retrying in {interval_s:.0f}s…")
+        time.sleep(interval_s)
+        attempt += 1
+    logger.error("Timed out waiting for NV runtime to be ready. Proceeding with tests anyway.")
+    return False
 
 
 def test_decoder(decoder_name: str, hw_flags: List[str]) -> Tuple[bool, str]:
@@ -63,7 +99,22 @@ def test_decoder(decoder_name: str, hw_flags: List[str]) -> Tuple[bool, str]:
             "-i", test_file,
             "-f", "null", "-"
         ])
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=get_gpu_env())
+        # Retry if CUDA not initialized yet
+        attempts = 5
+        delay = 1.0
+        result = None
+        for i in range(1, attempts + 1):
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=get_gpu_env())
+            stderr_lower = (result.stderr or '').lower()
+            if result.returncode != 0:
+                break
+            if any(err in stderr_lower for err in ["cuinit(0)", "no device", "cannot load"]):
+                logger.warning(f"Decode init failed (attempt {i}/{attempts}). Retrying in {delay:.0f}s…")
+                import time; time.sleep(delay)
+                delay = min(delay * 2, 8.0)
+                continue
+            break
+        stderr_lower = (result.stderr or '').lower()
         stderr_lower = result.stderr.lower()
         
         if "no device found" in stderr_lower or "cannot load" in stderr_lower:
@@ -184,7 +235,11 @@ def run_startup_tests(hw_info: Dict) -> Dict[str, bool]:
     logger.info("🔍 GPU Environment Check:")
     logger.info(f"  NVIDIA_VISIBLE_DEVICES: {os.environ.get('NVIDIA_VISIBLE_DEVICES', 'NOT SET')}")
     logger.info(f"  NVIDIA_DRIVER_CAPABILITIES: {os.environ.get('NVIDIA_DRIVER_CAPABILITIES', 'NOT SET')}")
+    logger.info(f"  LD_LIBRARY_PATH: {os.environ.get('LD_LIBRARY_PATH', 'NOT SET')}")
     logger.info("")
+
+    # Ensure NV runtime is ready before running tests (addresses cuInit(0) fail on early start)
+    _wait_for_nv_runtime_ready(timeout_s=30.0, interval_s=2.0)
     
     logger.info("")
     logger.info("╔" + "═" * 68 + "╗")

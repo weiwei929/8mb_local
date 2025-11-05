@@ -1149,9 +1149,9 @@
             <span class="text-sm">🚀 Fast finalize (recommended)</span>
           </label>
           {/if}
-          <label class="flex items-center gap-2 cursor-pointer">
+          <label class="flex items-center gap-2 cursor-pointer" title="When enabled, the decoder will try to use GPU hardware decoding whenever possible.">
             <input type="checkbox" bind:checked={preferHwDecode} class="w-4 h-4" />
-            <span class="text-sm">⚡ Prefer hardware decoding</span>
+            <span class="text-sm">⚡ Force hardware decoding</span>
           </label>
         </div>
       </div>

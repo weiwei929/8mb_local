@@ -73,10 +73,14 @@
 	let newPresetName: string = '';
 	let retentionHours: number = 1;
 	let workerConcurrency: number = 4;
+	  // Hardware tests state
+	  let hwTests: Array<any> = [];
+	  let hwTestsLoading: boolean = false;
+	  let hwTestsError: string = '';
 
 	  onMount(async () => {
 	try {
-		  const [authRes, presetsRes, codecsRes, historyRes] = await Promise.all([
+			  const [authRes, presetsRes, codecsRes, historyRes] = await Promise.all([
 		fetch('/api/settings/auth'),
 		fetch('/api/settings/presets'),
 		fetch('/api/settings/codecs'),
@@ -123,6 +127,15 @@
 		if (wc.ok) { const js = await wc.json(); workerConcurrency = js.concurrency ?? 4; }
 	  } catch {}
 
+			// Load initial hardware test results (best-effort)
+			try {
+				const t = await fetch('/api/system/encoder-tests');
+				if (t.ok) {
+					const js = await t.json();
+					hwTests = js.results || [];
+				}
+			} catch {}
+
       // Startup info for first-boot banner
       try {
         const si = await fetch('/api/startup/info');
@@ -141,6 +154,26 @@
 	  error = 'Failed to load settings';
 	}
   });
+
+	async function rerunHardwareTests(){
+		hwTestsError = '';
+		hwTestsLoading = true;
+		try {
+			const res = await fetch('/api/system/encoder-tests/rerun', { method: 'POST' });
+			if (res.ok) {
+				const js = await res.json();
+				hwTests = js.results || [];
+				message = 'Hardware tests re-ran successfully';
+			} else {
+				const d = await res.json().catch(()=>({}));
+				hwTestsError = d.detail || 'Failed to re-run hardware tests';
+			}
+		} catch (e) {
+			hwTestsError = 'Failed to re-run hardware tests';
+		} finally {
+			hwTestsLoading = false;
+		}
+	}
 
   async function saveAuth() {
 	error = '';
@@ -491,6 +524,35 @@
 	  <button class="btn" on:click={saveCodecs} disabled={saving}>{saving ? 'Saving…' : 'Save codec settings'}</button>
 	</div>
   </div>
+
+	<!-- Hardware Tests -->
+	<div class="card">
+		<div class="title">Hardware Tests</div>
+		<p class="label" style="margin-bottom:12px; color:#9ca3af">Validate hardware encoders/decoders inside the worker. Useful after driver updates or container restarts.</p>
+		{#if hwTestsError}
+			<div class="msg err">{hwTestsError}</div>
+		{/if}
+		<div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
+			<button class="btn" on:click={rerunHardwareTests} disabled={hwTestsLoading}>{hwTestsLoading ? 'Running…' : 'Re-run hardware tests'}</button>
+			<button class="btn alt" on:click={async()=>{ try{ const r=await fetch('/api/system/encoder-tests'); if(r.ok){ const js=await r.json(); hwTests = js.results||[]; message='Loaded latest test results'; } }catch{}}} disabled={hwTestsLoading}>Refresh results</button>
+		</div>
+		{#if hwTests && hwTests.length}
+			<ul class="text-sm space-y-1">
+				{#each hwTests as t}
+					<li class="flex items-center justify-between">
+						<span>{t.codec} <span class="opacity-60">({t.actual_encoder})</span></span>
+						{#if t.passed}
+							<span class="text-green-400">PASS</span>
+						{:else}
+							<span class="text-red-400">FAIL</span>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		{:else}
+			<p class="label" style="color:#9ca3af">No test results available yet.</p>
+		{/if}
+	</div>
 
   <!-- Compression History -->
   <div class="card">

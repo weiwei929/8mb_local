@@ -1,7 +1,7 @@
 # Multi-stage unified 8mb.local container
 # Stage 1: Build FFmpeg with multi-vendor GPU support (NVIDIA NVENC, Intel QSV, AMD AMF/VAAPI)
-# Using CUDA 11.8 for compatibility with older NVIDIA drivers (535.x series)
-FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 AS ffmpeg-build
+# Use CUDA 12.2 devel image: supports RTX 50-series and is compatible with NVIDIA driver 535+
+FROM nvidia/cuda:12.2.0-devel-ubuntu22.04 AS ffmpeg-build
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -15,7 +15,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 WORKDIR /build
 
 # NVIDIA NVENC headers
-# Pin to NVENC API 12.1 (driver 535.x compatibility). Use sdk/12.1.
+# Pin to NVENC API 12.1 for widest compatibility with driver 535.x, while CUDA 12.2 runtime covers RTX 50‑series
 RUN git clone https://git.videolan.org/git/ffmpeg/nv-codec-headers.git && \
     cd nv-codec-headers && git checkout sdk/12.1 && make install && cd ..
 
@@ -53,8 +53,8 @@ RUN npm run build && \
     find build -name "*.ts" -delete
 
 # Stage 3: Runtime with all services
-# Using CUDA 11.8 runtime for compatibility with older NVIDIA drivers (535.x series)
-FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
+# Use CUDA 12.2 runtime: minimum driver 535; supports RTX 50-series and older (535+) systems
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 
 # Build-time version (can be overridden)
 ARG BUILD_VERSION=123

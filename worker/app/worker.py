@@ -32,13 +32,25 @@ ENCODER_TEST_CACHE: Dict[str, bool] = {}
 
 def get_gpu_env():
     """
-    Get environment with NVIDIA GPU variables for subprocess calls.
-    Critical: subprocess.Popen() does NOT inherit NVIDIA_DRIVER_CAPABILITIES by default.
+    Get environment with NVIDIA GPU variables and library paths for subprocess calls.
+    Includes LD_LIBRARY_PATH locations needed for CUDA on WSL2 and NVIDIA toolkit.
     """
     env = os.environ.copy()
     # Ensure NVIDIA variables are set for GPU access
     env['NVIDIA_VISIBLE_DEVICES'] = env.get('NVIDIA_VISIBLE_DEVICES', 'all')
     env['NVIDIA_DRIVER_CAPABILITIES'] = env.get('NVIDIA_DRIVER_CAPABILITIES', 'compute,video,utility')
+    # Add common library locations (non-destructive append)
+    lib_paths = [
+        '/usr/local/nvidia/lib64',
+        '/usr/local/nvidia/lib',
+        '/usr/local/cuda/lib64',
+        '/usr/local/cuda/lib',
+        '/usr/lib/wsl/lib',  # WSL2 libcuda.so location
+        '/usr/lib/x86_64-linux-gnu',
+    ]
+    existing = env.get('LD_LIBRARY_PATH', '')
+    add = ':'.join(p for p in lib_paths if p)
+    env['LD_LIBRARY_PATH'] = (existing + (':' if existing and add else '') + add) if (existing or add) else ''
     return env
 
 def _start_encoder_tests_async():
@@ -98,6 +110,24 @@ def _is_cancelled(task_id: str) -> bool:
 def get_hardware_info_task():
     """Return hardware acceleration info for the frontend."""
     return get_hw_info()
+
+
+@celery_app.task(name="worker.worker.run_hardware_tests")
+def run_hardware_tests_task() -> dict:
+    """Trigger encoder/decoder startup tests on demand and refresh cache.
+
+    Returns a small summary with the number of cache entries updated.
+    """
+    try:
+        _hw_info = get_hw_info()
+        cache = run_startup_tests(_hw_info)
+        try:
+            ENCODER_TEST_CACHE.update(cache)
+        except Exception:
+            pass
+        return {"status": "ok", "updated": len(cache)}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 @celery_app.task(name="worker.worker.compress_video", bind=True)
@@ -331,7 +361,9 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
 
     def has_decoder(dec_name: str) -> bool:
         try:
-            r = subprocess.run(["ffmpeg", "-hide_banner", "-decoders"], capture_output=True, text=True, timeout=5)
+            r = subprocess.run([
+                "ffmpeg", "-hide_banner", "-decoders"
+            ], capture_output=True, text=True, timeout=5, env=get_gpu_env())
             return (r.returncode == 0) and (dec_name in (r.stdout or ""))
         except Exception:
             return False
@@ -346,7 +378,7 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
                 "-i", path,
                 "-f", "null", "-"
             ]
-            r = subprocess.run(test_cmd, capture_output=True, text=True, timeout=10)
+            r = subprocess.run(test_cmd, capture_output=True, text=True, timeout=10, env=get_gpu_env())
             stderr = (r.stderr or "").lower()
             if "doesn't support hardware accelerated" in stderr or "failed setup for format cuda" in stderr:
                 return False
@@ -368,7 +400,7 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
                 "-i", path,
                 "-f", "null", "-"
             ]
-            r = subprocess.run(test_cmd, capture_output=True, text=True, timeout=10)
+            r = subprocess.run(test_cmd, capture_output=True, text=True, timeout=10, env=get_gpu_env())
             stderr = (r.stderr or "").lower()
             if any(s in stderr for s in ["not found", "unknown decoder", "cannot load", "init failed", "device not present"]):
                 return False
@@ -376,21 +408,39 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         except Exception:
             return False
 
+    # Log force decode preference once
+    if force_hw_decode:
+        _publish(self.request.id, {"type": "log", "message": "Force hardware decode: enabled"})
+
     # AV1 decode strategy
     if in_codec == "av1":
-        if actual_encoder.endswith("_nvenc") and can_av1_cuvid_decode(input_path):
-            # Use CUDA decode with cuda output format for GPU-to-GPU pipeline
-            init_hw_flags = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] + init_hw_flags
-            input_opts += ["-c:v", "av1_cuvid"]
-            # Remove -pix_fmt yuv420p from v_flags since we're using CUDA frames
-            v_flags = [f for i, f in enumerate(v_flags) if not (f == "-pix_fmt" or (i > 0 and v_flags[i-1] == "-pix_fmt"))]
-            _publish(self.request.id, {"type": "log", "message": "Decoder: using av1_cuvid (CUDA) with GPU-to-GPU pipeline"})
+        if actual_encoder.endswith("_nvenc"):
+            # If forcing HW decode, prefer av1_cuvid when present without slow preflight
+            if force_hw_decode and has_decoder("av1_cuvid"):
+                init_hw_flags = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] + init_hw_flags
+                input_opts += ["-c:v", "av1_cuvid"]
+                # Remove -pix_fmt yuv420p since we're using CUDA frames
+                v_flags = [f for i, f in enumerate(v_flags) if not (f == "-pix_fmt" or (i > 0 and v_flags[i-1] == "-pix_fmt"))]
+                _publish(self.request.id, {"type": "log", "message": "Decoder: forcing av1_cuvid (CUDA) for GPU-to-GPU pipeline"})
+            elif can_av1_cuvid_decode(input_path):
+                # Use CUDA decode with cuda output format for GPU-to-GPU pipeline
+                init_hw_flags = ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"] + init_hw_flags
+                input_opts += ["-c:v", "av1_cuvid"]
+                # Remove -pix_fmt yuv420p from v_flags since we're using CUDA frames
+                v_flags = [f for i, f in enumerate(v_flags) if not (f == "-pix_fmt" or (i > 0 and v_flags[i-1] == "-pix_fmt"))]
+                _publish(self.request.id, {"type": "log", "message": "Decoder: using av1_cuvid (CUDA) with GPU-to-GPU pipeline"})
+            else:
+                # Software decode fallback (av1_cuvid unavailable)
+                input_opts += ["-c:v", "libdav1d"]
+                msg = "Decoder: av1_cuvid not available; using libdav1d"
+                if force_hw_decode:
+                    msg += " (force requested, but CUVID not present)"
+                _publish(self.request.id, {"type": "log", "message": msg})
         else:
-            # Software decode fallback
-            input_opts += ["-c:v", "libdav1d"]
-            _publish(self.request.id, {"type": "log", "message": "Decoder: using libdav1d for AV1 input"})
+            # Non-NVIDIA path; leave defaults (QSV/VAAPI init flags are set via map_codec_to_hw)
+            pass
     elif in_codec in ("h264", "hevc") and actual_encoder.endswith("_nvenc"):
-        # H.264/HEVC: NVDEC widely supported
+        # H.264/HEVC: NVDEC widely supported; always prefer CUDA when using NVENC
         init_hw_flags = ["-hwaccel", "cuda"] + init_hw_flags
         _publish(self.request.id, {"type": "log", "message": f"Decoder: using cuda ({in_codec})"})
 

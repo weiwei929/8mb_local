@@ -2,6 +2,16 @@
 
 8mb.local is a self‑hosted, fire‑and‑forget video compressor. Drop a file, choose a target size (e.g., 8MB, 25MB, 50MB, 100MB), and let GPU-accelerated encoding produce compact outputs with AV1/HEVC/H.264. Supports **NVIDIA NVENC**, **Intel/AMD VAAPI** (Linux), and **CPU fallback**. The stack includes a SvelteKit UI, FastAPI backend, Celery worker, Redis broker, and real‑time progress via Server‑Sent Events (SSE).
 
+> Note (Nov 2025): CUDA/Driver compatibility updated
+>
+> The container now uses CUDA 12.2 (build + runtime) to support RTX 50‑series GPUs (e.g., 5070 Ti) while staying compatible with servers on NVIDIA driver 535.x.
+>
+> - Build: `nvidia/cuda:12.2.0-devel-ubuntu22.04`
+> - Runtime: `nvidia/cuda:12.2.0-runtime-ubuntu22.04`
+> - NVENC headers: `sdk/12.1` (maximizes compatibility with driver 535.x)
+>
+> Minimum Linux driver: 535.54.03. This resolves `cuInit(0)` / `CUDA_ERROR_NOT_FOUND` seen with older CUDA 11.8 base images on 50‑series GPUs.
+
 ## Table of Contents
 * [Features](#features)
 * [Architecture](#architecture-technical-deep-dive)
