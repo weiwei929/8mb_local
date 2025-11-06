@@ -21,8 +21,8 @@
   let tune: 'hq'|'ll'|'ull'|'lossless' = 'hq';
   // Decoder preference
   let preferHwDecode: boolean = true; // Prefer hardware decoding when available
-  // MP4 finalize preference - DEFAULT TO TRUE for better UX
-  let fastMp4Finalize: boolean = true;
+  // MP4 finalize preference - default OFF for broader compatibility
+  let fastMp4Finalize: boolean = false;
   // New resolution and trim controls
   let maxWidth: number | null = null;
   let maxHeight: number | null = null;
