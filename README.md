@@ -2,15 +2,29 @@
 
 8mb.local is a self‑hosted, fire‑and‑forget video compressor. Drop a file, choose a target size (e.g., 8MB, 25MB, 50MB, 100MB), and let GPU-accelerated encoding produce compact outputs with AV1/HEVC/H.264. Supports **NVIDIA NVENC**, **Intel/AMD VAAPI** (Linux), and **CPU fallback**. The stack includes a SvelteKit UI, FastAPI backend, Celery worker, Redis broker, and real‑time progress via Server‑Sent Events (SSE).
 
-> Note (Nov 2025): CUDA/Driver compatibility updated
+> Note (Nov 2025): RTX 50-Series (Blackwell) Support
 >
-> The container now uses CUDA 12.2 (build + runtime) to support RTX 50‑series GPUs (e.g., 5070 Ti) while staying compatible with servers on NVIDIA driver 535.x.
+> **🎉 RTX 50-Series Users (RTX 5090/5080/5070 Ti/etc.):**  
+> Verified working support with full NVENC hardware acceleration!
 >
-> - Build: `nvidia/cuda:12.2.0-devel-ubuntu22.04`
-> - Runtime: `nvidia/cuda:12.2.0-runtime-ubuntu22.04`
-> - NVENC headers: `sdk/12.1` (maximizes compatibility with driver 535.x)
+> **Docker Image:** `jms1717/8mblocal:rtx50-working`  
+> **Branch:** `rtx50-blackwell`  
+> **Complete Setup Guide:** [RTX50-WORKING.md](https://github.com/JMS1717/8mb.local/blob/rtx50-blackwell/RTX50-WORKING.md)
 >
-> Minimum Linux driver: 535.54.03. This resolves `cuInit(0)` / `CUDA_ERROR_NOT_FOUND` seen with older CUDA 11.8 base images on 50‑series GPUs.
+> **⚠️ CRITICAL for RTX 50-series:** You must mount the WSL driver directory:  
+> `-v /usr/lib/wsl/drivers:/usr/lib/wsl/drivers:ro`  
+> (Already configured in docker-compose.yml on the rtx50-blackwell branch)
+>
+> **Requirements:**
+> - RTX 50-series GPU (Blackwell/SM_100)
+> - NVIDIA Driver 550.x+ (tested with 581.80)
+> - Windows 11 WSL2 or Linux with CUDA 13 support
+>
+> **Verified Test Results:** ✅ All 6 encoders passing (h264_nvenc, hevc_nvenc, av1_nvenc, libx264, libx265, libaom-av1)
+>
+> **Other NVIDIA GPUs:**
+> - Main branch: CUDA 12.2 + FFmpeg 6.1.1, driver 535.x+ (Turing/Ampere/Ada)
+> - CPU/VAAPI still work if NVENC is incompatible
 
 ## Table of Contents
 * [Features](#features)
