@@ -34,6 +34,25 @@
 > - Main branch: CUDA 12.2 + FFmpeg 6.1.1, driver 535.x+ (Turing/Ampere/Ada)
 > - CPU/VAAPI still work if NVENC is incompatible
 
+### Intel Arc / Integrated Graphics (Linux)
+
+Intel Arc (e.g., A140, A380) and recent Intel iGPUs are supported via VAAPI and QSV (libmfx) on Linux hosts.
+
+- Requirements on the host:
+  - Linux with Intel GPU and kernel DRM i915/i915k
+  - Intel media driver installed on host (usually preinstalled)
+  - Docker with `--device /dev/dri` access
+- Container configuration (already included):
+  - FFmpeg built with `--enable-vaapi` and `--enable-libmfx` (QSV)
+  - Runtime packages: `intel-media-driver`, `libmfx1`, `libva-utils`
+  - Environment: `LIBVA_DRIVER_NAME=iHD`
+- How to run on Linux (bare metal):
+  - Uncomment the devices mapping in `docker-compose.yml`:
+    - `devices: ["/dev/dri:/dev/dri"]`
+
+Limitations:
+- WSL2 (Windows) does not currently expose Intel VAAPI/QSV devices to Linux containers. On Windows, NVIDIA (CUDA/NVENC) is supported; Intel VAAPI/QSV is supported on Linux hosts.
+
 ## Table of Contents
 * [Features](#features)
 * [Architecture](#architecture-technical-deep-dive)

@@ -10,7 +10,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     build-essential yasm cmake pkg-config git wget ca-certificates \
     libnuma-dev libx264-dev libx265-dev libvpx-dev libopus-dev \
     libaom-dev libdav1d-dev \
-    libva-dev libdrm-dev
+    libva-dev libdrm-dev libmfx-dev
 
 WORKDIR /build
 
@@ -22,10 +22,10 @@ RUN git clone https://git.videolan.org/git/ffmpeg/nv-codec-headers.git && \
 # Build FFmpeg with all hardware acceleration support
 RUN wget -q https://ffmpeg.org/releases/ffmpeg-6.1.1.tar.xz && \
         tar xf ffmpeg-6.1.1.tar.xz && cd ffmpeg-6.1.1 && \
-        ./configure \
+                ./configure \
       --enable-nonfree --enable-gpl \
       --enable-cuda-nvcc --enable-libnpp --enable-nvenc \
-      --enable-vaapi \
+            --enable-vaapi --enable-libmfx \
       --enable-libx264 --enable-libx265 --enable-libvpx --enable-libopus --enable-libaom --enable-libdav1d \
       --extra-cflags=-I/usr/local/cuda/include \
       --extra-ldflags=-L/usr/local/cuda/lib64 \
@@ -72,6 +72,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     python3.10 python3-pip supervisor redis-server \
     libopus0 libx264-163 libx265-199 libvpx7 libnuma1 \
     libva2 libva-drm2 libaom3 libdav1d5 \
+    intel-media-driver libmfx1 libva-utils \
     && apt-get clean && rm -rf /tmp/*
 
 # Copy FFmpeg from build stage (only what we need)
@@ -119,6 +120,7 @@ RUN mkdir -p /app/uploads /app/outputs /var/log/supervisor /var/lib/redis /var/l
 # Set NVIDIA driver capabilities for NVENC/NVDEC support
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
 ENV NVIDIA_VISIBLE_DEVICES=all
+ENV LIBVA_DRIVER_NAME=iHD
 
 # Configure supervisord
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
