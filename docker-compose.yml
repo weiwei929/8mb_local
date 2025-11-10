@@ -12,21 +12,15 @@ services:
       - REDIS_URL=redis://127.0.0.1:6379/0
       # Intel VAAPI/QSV: enable only on Linux hosts with Intel/AMD GPUs
       # - LIBVA_DRIVER_NAME=iHD
-    # === Choose ONE of the following blocks ===
-    # 1) NVIDIA (uncomment if you have NVIDIA GPU)
-    # gpus: all
-    # environment:
-    #   - NVIDIA_VISIBLE_DEVICES=all
-    #   - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    # === GPU configuration ===
+    # If you have an NVIDIA GPU, the container will be started with GPU access
+    # (gpus: all) so NVENC/NVDEC can be used by ffmpeg inside the container.
+    gpus: all
 
-    # 2) Intel/AMD VAAPI on Linux (uncomment if you have Intel/AMD GPU on Linux)
+    # If you instead have Intel/AMD and want VAAPI/QSV on Linux hosts, replace
+    # the above with the devices mapping below (uncomment and use on Linux only):
     # devices:
     #   - "/dev/dri:/dev/dri"
     # environment:

@@ -164,6 +164,12 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
         cache_key = f"{actual_encoder}:{':'.join(init_hw_flags)}"
         if cache_key in ENCODER_TEST_CACHE and not ENCODER_TEST_CACHE[cache_key]:
             _publish(self.request.id, {"type": "log", "message": f"⚠️ {actual_encoder} marked unavailable by startup tests, falling back to CPU"})
+            _publish(self.request.id, {"type": "log", "message": (
+                "Note: The selected hardware encoder failed initialization during startup tests. "
+                "This means hardware acceleration for this codec is unavailable on this system; "
+                "the job will use a CPU encoder instead which is typically much slower and increases CPU usage. "
+                "To enable hardware encoding, ensure drivers/libraries are installed and run 'System → Run encoder tests' in the UI to refresh results."
+            )})
             # Determine CPU fallback based on codec type
             if "h264" in actual_encoder:
                 actual_encoder = "libx264"
@@ -778,6 +784,11 @@ def compress_video(self, job_id: str, input_path: str, output_path: str, target_
 
     if rc != 0 and (actual_encoder.endswith("_nvenc") or actual_encoder.endswith("_qsv") or actual_encoder.endswith("_vaapi") or actual_encoder.endswith("_amf")):
         _publish(self.request.id, {"type": "log", "message": f"⚠️ Hardware encode failed (rc={rc}). Retrying on CPU..."})
+        _publish(self.request.id, {"type": "log", "message": (
+            "Explanation: The hardware encoder failed at runtime. The worker will retry using a CPU encoder which is slower. "
+            "This can happen if drivers, device nodes, or libraries are missing or if the encoder is unsupported by the current ffmpeg build. "
+            "Run the encoder diagnostic tests from the UI or check logs to investigate."
+        )})
         # Determine CPU fallback
         if "h264" in actual_encoder:
             fb_encoder = "libx264"; fb_flags = ["-pix_fmt","yuv420p","-profile:v","high"]

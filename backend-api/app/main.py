@@ -238,13 +238,64 @@ async def _sync_codec_settings_from_tests(timeout_s: int = 60):
         ]
 
         if avail:
-            # If we have a definitive list, disable all HW keys then enable reported ones
+            # If we have a definitive list, start by disabling all HW keys
             for k in hardware_keys:
                 payload[k] = False
-            for v in avail.values():
-                key = v.replace('-', '_')
-                if key in payload:
-                    payload[key] = True
+
+            # For each hardware codec, consult the worker-side startup test results
+            # saved in Redis (encoder_test_json:{codec} or encoder_test:{codec}).
+            # If tests exist, enable only those that passed; otherwise fall back
+            # to enabling based on hw_info availability to avoid hiding working
+            # hardware when tests haven't run yet.
+            for codec in hardware_keys:
+                # By default, enable if the hw_info reports this encoder is available
+                # (e.g., available_encoders values may include h264_nvenc)
+                default_enabled = False
+                try:
+                    if codec in avail.values() or codec.replace('_', '-') in avail.values():
+                        default_enabled = True
+                except Exception:
+                    default_enabled = False
+
+                # Check Redis for test JSON detail
+                try:
+                    encode_detail_raw = await redis.get(f"encoder_test_json:{codec}")
+                    decode_detail_raw = await redis.get(f"encoder_test_decode_json:{codec}")
+                    flag = await redis.get(f"encoder_test:{codec}")
+                except Exception:
+                    encode_detail_raw = None
+                    decode_detail_raw = None
+                    flag = None
+
+                overall_passed = None
+                encode_passed = None
+                decode_passed = None
+
+                if encode_detail_raw:
+                    try:
+                        ed = json.loads(encode_detail_raw)
+                        encode_passed = bool(ed.get("passed"))
+                    except Exception:
+                        encode_passed = None
+                elif flag is not None:
+                    # Fallback boolean flag
+                    encode_passed = (str(flag) == "1")
+
+                if decode_detail_raw:
+                    try:
+                        dd = json.loads(decode_detail_raw)
+                        decode_passed = bool(dd.get("passed"))
+                    except Exception:
+                        decode_passed = None
+
+                if encode_passed is not None:
+                    overall_passed = encode_passed and (decode_passed is None or decode_passed)
+
+                # If we have an explicit test result, use it. Otherwise use default.
+                if overall_passed is not None:
+                    payload[codec] = bool(overall_passed)
+                else:
+                    payload[codec] = bool(default_enabled)
         else:
             # No hardware info yet; do not change existing HW visibility
             pass
