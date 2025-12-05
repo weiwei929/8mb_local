@@ -9,13 +9,13 @@ import shutil
 import subprocess
 import uuid
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Any
 
 import orjson
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from starlette.staticfiles import StaticFiles
 from redis.asyncio import Redis
 import psutil
 
@@ -49,8 +49,8 @@ HW_INFO_CACHE: dict | None = None
 SYSTEM_CAPS_CACHE: dict | None = None
 
 
-def _get_hw_info_cached() -> dict:
-    """Get hardware info from cache or compute once via worker."""
+async def _get_hw_info_cached_async() -> dict:
+    """Get hardware info from cache or compute once via worker (async version)."""
     global HW_INFO_CACHE
     if HW_INFO_CACHE is not None:
         # If cached info exists but doesn't include a 'preferred' codec (worker
@@ -60,31 +60,52 @@ def _get_hw_info_cached() -> dict:
             if isinstance(HW_INFO_CACHE, dict) and "preferred" in HW_INFO_CACHE:
                 return HW_INFO_CACHE
             # Try a short fresh query to pick up preferred codec
-            fresh = _get_hw_info_fresh(timeout=2)
+            fresh = await _get_hw_info_fresh_async(timeout=2)
             HW_INFO_CACHE = fresh or HW_INFO_CACHE
             return HW_INFO_CACHE
         except Exception:
             return HW_INFO_CACHE
     try:
         result = celery_app.send_task("worker.worker.get_hardware_info")
-        HW_INFO_CACHE = result.get(timeout=5) or {"type": "cpu", "available_encoders": {}}
+        # Use thread pool to avoid blocking the event loop
+        def _get_result():
+            return result.get(timeout=5) or {"type": "cpu", "available_encoders": {}}
+        HW_INFO_CACHE = await asyncio.to_thread(_get_result)
     except Exception:
         HW_INFO_CACHE = {"type": "cpu", "available_encoders": {}}
     return HW_INFO_CACHE
 
 
-def _get_hw_info_fresh(timeout: int = 10) -> dict:
-    """Force-refresh hardware info from worker, updating cache if successful."""
+async def _get_hw_info_fresh_async(timeout: int = 10) -> dict:
+    """Force-refresh hardware info from worker, updating cache if successful (async version)."""
     global HW_INFO_CACHE
     try:
         result = celery_app.send_task("worker.worker.get_hardware_info")
-        info = result.get(timeout=timeout) or {"type": "cpu", "available_encoders": {}}
+        # Use thread pool to avoid blocking the event loop
+        def _get_result():
+            return result.get(timeout=timeout) or {"type": "cpu", "available_encoders": {}}
+        info = await asyncio.to_thread(_get_result)
         # Update cache with fresh info
         HW_INFO_CACHE = info
         return info
     except Exception:
         # Return existing cache if present, else CPU fallback
         return HW_INFO_CACHE or {"type": "cpu", "available_encoders": {}}
+
+
+def _get_hw_info_cached() -> dict:
+    """Synchronous wrapper for backward compatibility (deprecated - use async version)."""
+    global HW_INFO_CACHE
+    if HW_INFO_CACHE is not None:
+        return HW_INFO_CACHE
+    # Fallback to CPU if cache not initialized
+    return {"type": "cpu", "available_encoders": {}}
+
+
+def _get_hw_info_fresh(timeout: int = 10) -> dict:
+    """Synchronous wrapper for backward compatibility (deprecated - use async version)."""
+    global HW_INFO_CACHE
+    return HW_INFO_CACHE or {"type": "cpu", "available_encoders": {}}
 
 
 def _ffprobe(input_path: Path) -> dict:
@@ -223,7 +244,7 @@ async def _sync_codec_settings_from_tests(timeout_s: int = 60):
         while time.time() < deadline:
             try:
                 # Force refresh to avoid stale CPU cache on early startup
-                hw_info = _get_hw_info_fresh(timeout=5) or {}
+                hw_info = await _get_hw_info_fresh_async(timeout=5) or {}
                 avail = hw_info.get("available_encoders", {}) or {}
                 if avail:  # Got concrete encoders like h264_nvenc, etc.
                     break
@@ -333,8 +354,21 @@ async def upload(file: UploadFile = File(...), target_size_mb: float = 25.0, aud
     # File size limit to prevent OOM (default 50GB)
     MAX_FILE_SIZE = int(os.getenv("MAX_UPLOAD_SIZE_MB", "51200")) * 1024 * 1024
     
+    # Sanitize filename to prevent path traversal attacks
+    # Extract only the filename component, removing any path separators
+    raw_filename = file.filename or "unnamed"
+    safe_filename = Path(raw_filename).name
+    
+    # Reject empty filenames or hidden files (starting with .)
+    if not safe_filename or safe_filename.startswith('.'):
+        raise HTTPException(status_code=400, detail="Invalid filename: filename cannot be empty or start with '.'")
+    
+    # Additional validation: reject filenames with only whitespace
+    if not safe_filename.strip():
+        raise HTTPException(status_code=400, detail="Invalid filename: filename cannot be whitespace only")
+    
     job_id = str(uuid.uuid4())
-    dest = UPLOADS_DIR / f"{job_id}_{file.filename}"
+    dest = UPLOADS_DIR / f"{job_id}_{safe_filename}"
     
     # Save file with size check
     total_size = 0
@@ -389,9 +423,31 @@ async def startup_info():
 
 @app.post("/api/compress", dependencies=[Depends(basic_auth)])
 async def compress(req: CompressRequest):
-    input_path = UPLOADS_DIR / req.filename
+    # Validate and sanitize input path to prevent path traversal attacks
+    # Extract only the filename component from the request
+    safe_filename = Path(req.filename).name
+    
+    # Reject empty filenames
+    if not safe_filename or not safe_filename.strip():
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    # Construct path and resolve to absolute path
+    input_path = (UPLOADS_DIR / safe_filename).resolve()
+    
+    # Verify the resolved path is within UPLOADS_DIR (prevent directory traversal)
+    try:
+        input_path.relative_to(UPLOADS_DIR.resolve())
+    except ValueError:
+        # Path is outside UPLOADS_DIR
+        raise HTTPException(status_code=403, detail="Invalid file path: path traversal detected")
+    
     if not input_path.exists():
         raise HTTPException(status_code=404, detail="Input not found")
+    
+    # Verify the job_id matches the filename prefix (additional security check)
+    # Expected format: {job_id}_{original_filename}
+    if not input_path.name.startswith(req.job_id + "_"):
+        raise HTTPException(status_code=403, detail="Job ID mismatch: filename does not match job ID")
     # Audio-only output selection (.m4a) overrides container
     if req.audio_only:
         ext = ".m4a"
@@ -781,7 +837,8 @@ async def _sse_event_generator(task_id: str) -> AsyncGenerator[bytes, None]:
                 if msg.get("type") != "message":
                     continue
                 data = msg.get("data")
-                logger.info(f"[SSE {task_id[:8]}] Received Redis message: {data[:100] if isinstance(data, str) else data}")
+                # Downgrade repetitive message logging to debug level
+                logger.debug(f"[SSE {task_id[:8]}] Received Redis message: {data[:100] if isinstance(data, str) else data}")
                 sys.stdout.flush()  # Force flush
                 # push raw json string from publisher
                 await queue.put(str(data))
@@ -814,7 +871,8 @@ async def _sse_event_generator(task_id: str) -> AsyncGenerator[bytes, None]:
         logger.info(f"[SSE {task_id[:8]}] Stream started")
         while True:
             data = await queue.get()
-            logger.info(f"[SSE {task_id[:8]}] Yielding: {data[:100] if len(data) > 100 else data}")
+            # Downgrade repetitive yield logging to debug level
+            logger.debug(f"[SSE {task_id[:8]}] Yielding: {data[:100] if len(data) > 100 else data}")
             yield f"data: {data}\n\n".encode()
     finally:
         logger.info(f"[SSE {task_id[:8]}] Stream closing")
@@ -856,9 +914,9 @@ async def get_hardware_info():
     # Prefer a short fresh query so the UI sees the worker's "preferred" codec
     # shortly after startup tests complete. Fall back to cached info on timeout.
     try:
-        info = _get_hw_info_fresh(timeout=5) or _get_hw_info_cached()
+        info = await _get_hw_info_fresh_async(timeout=5) or await _get_hw_info_cached_async()
     except Exception:
-        info = _get_hw_info_cached()
+        info = await _get_hw_info_cached_async()
 
     # Compute a preferred codec on the API side using Redis-backed startup test
     # results if the worker didn't attach it. This avoids depending on the
@@ -881,7 +939,7 @@ async def get_available_codecs() -> AvailableCodecsResponse:
     """Get available codecs based on hardware detection, user settings, and encoder tests."""
     try:
         # Use cached hardware info
-        hw_info = _get_hw_info_cached()
+        hw_info = await _get_hw_info_cached_async()
 
         # Get user codec visibility settings
         codec_settings = settings_manager.get_codec_visibility_settings()
@@ -940,7 +998,7 @@ async def system_capabilities():
     global SYSTEM_CAPS_CACHE
     if SYSTEM_CAPS_CACHE is None:
         caps = _get_system_capabilities()
-        caps["hardware"] = _get_hw_info_cached()
+        caps["hardware"] = await _get_hw_info_cached_async()
         SYSTEM_CAPS_CACHE = caps
     return SYSTEM_CAPS_CACHE
 
@@ -952,7 +1010,7 @@ async def system_encoder_tests():
     Reads cached results from Redis written by the worker at startup.
     """
     try:
-        hw_info = _get_hw_info_cached()
+        hw_info = await _get_hw_info_cached_async()
     except Exception:
         hw_info = {"type": "cpu", "available_encoders": {}}
 
@@ -1094,7 +1152,7 @@ async def gpu_diagnostics():
             return {"cmd": " ".join(cmd), "rc": 1, "stdout": "", "stderr": str(e)}
 
     # Collect checks
-    checks: dict[str, any] = {}
+    checks: dict[str, Any] = {}
 
     # Device files
     try:
@@ -1349,13 +1407,15 @@ async def startup_event():
     settings_manager.initialize_env_if_missing()
     # Start cleanup scheduler
     start_scheduler()
-    # Initialize hardware and system capabilities cache once
-    try:
-        _ = _get_hw_info_cached()
-        # Warm system capabilities cache
-        _ = system_capabilities  # function ref to avoid linter warning
-    except Exception:
-        pass
+    # Initialize hardware and system capabilities cache once (async)
+    async def _warm_cache():
+        try:
+            _ = await _get_hw_info_cached_async()
+            # Warm system capabilities cache
+            _ = await system_capabilities()
+        except Exception:
+            pass
+    asyncio.create_task(_warm_cache())
 
 
 # Size buttons settings

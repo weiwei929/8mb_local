@@ -1,0 +1,29 @@
+{
+  "include": [
+    "backend-api",
+    "worker"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/node_modules",
+    "**/.venv",
+    "**/venv",
+    "frontend"
+  ],
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none",
+  "reportMissingTypeStubs": "none",
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "basic",
+  "executionEnvironments": [
+    {
+      "root": "backend-api",
+      "pythonVersion": "3.10"
+    },
+    {
+      "root": "worker",
+      "pythonVersion": "3.10"
+    }
+  ]
+}
+
